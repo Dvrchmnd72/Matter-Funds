@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { Matter, TrustLedger, Transaction, TrustAccount, TransactionType } from '../types';
@@ -35,7 +35,7 @@ export default function MatterDetail() {
   const [txnError, setTxnError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     if (!id) return;
     try {
       const [m, l] = await Promise.all([
@@ -54,9 +54,9 @@ export default function MatterDetail() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); }, [load]);
 
   const handleTxnSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

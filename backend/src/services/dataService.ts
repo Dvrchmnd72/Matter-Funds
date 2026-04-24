@@ -107,7 +107,7 @@ function seedData(): void {
       matterNumber,
       description,
       clientName,
-      clientEmail: `${clientName.toLowerCase().replace(/[^a-z]/g, '.')}@example.com`,
+      clientEmail: `${clientName.toLowerCase().replace(/[^a-z0-9]/g, '.').replace(/\.{2,}/g, '.')}@example.com`,
       clientPhone: '0400 000 000',
       matterType,
       status: 'active',
@@ -392,7 +392,9 @@ export const transactionService = {
 
     // Reversal goes opposite direction
     if (!isDebit && matter.trustBalance < original.amount) {
-      return { error: `Insufficient funds to reverse deposit` };
+      return {
+        error: `Insufficient funds to reverse deposit. Current trust balance: $${matter.trustBalance.toFixed(2)}, reversal amount: $${original.amount.toFixed(2)}`,
+      };
     }
 
     const reversalId = uuidv4();

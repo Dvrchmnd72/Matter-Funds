@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { api } from '../utils/api';
 import { TrustAccount, AustralianState } from '../types';
 import { formatCurrency, formatDate } from '../utils/format';
@@ -31,7 +31,7 @@ export default function TrustAccounts() {
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState('');
 
-  const fetchAccounts = async () => {
+  const fetchAccounts = useCallback(async () => {
     try {
       const state = selectedState === 'all' ? undefined : selectedState;
       const data = await api.getTrustAccounts(state);
@@ -41,9 +41,9 @@ export default function TrustAccounts() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedState]);
 
-  useEffect(() => { fetchAccounts(); }, [selectedState]);
+  useEffect(() => { fetchAccounts(); }, [fetchAccounts]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

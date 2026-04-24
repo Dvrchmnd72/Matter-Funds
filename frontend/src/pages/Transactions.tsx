@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { api } from '../utils/api';
 import { Transaction, AustralianState } from '../types';
 import { formatCurrency, formatDate, getTransactionTypeLabel } from '../utils/format';
@@ -14,7 +14,7 @@ export default function Transactions() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [search, setSearch] = useState('');
 
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api.getTransactions();
@@ -24,9 +24,9 @@ export default function Transactions() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { fetchTransactions(); }, []);
+  useEffect(() => { fetchTransactions(); }, [fetchTransactions]);
 
   const handleReverse = async (txn: Transaction) => {
     const reason = window.prompt(`Reverse "${txn.description}"\nEnter reason:`);
@@ -40,6 +40,7 @@ export default function Transactions() {
   };
 
   const filtered = transactions.filter((t) => {
+    if (selectedState !== 'all' && !t.matterNumber.startsWith(selectedState + '-')) return false;
     if (filterType !== 'all' && t.type !== filterType) return false;
     if (filterStatus !== 'all' && t.status !== filterStatus) return false;
     if (

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../utils/api';
 import { Matter, AustralianState, MatterType } from '../types';
@@ -46,7 +46,7 @@ export default function Matters() {
   const [formError, setFormError] = useState('');
   const [search, setSearch] = useState('');
 
-  const fetchMatters = async () => {
+  const fetchMatters = useCallback(async () => {
     try {
       const state = selectedState === 'all' ? undefined : selectedState;
       const data = await api.getMatters(state);
@@ -56,11 +56,11 @@ export default function Matters() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedState]);
 
   useEffect(() => {
     fetchMatters();
-  }, [selectedState]);
+  }, [fetchMatters]);
 
   const filteredMatters = matters.filter((m) =>
     search === '' ||
