@@ -1,7 +1,7 @@
 import datetime
 
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
 
 
 class Matter(models.Model):
@@ -34,7 +34,13 @@ class Matter(models.Model):
 
     def save(self, *args, **kwargs):
         if not self.file_number:
-            year = datetime.date.today().year
-            sequence = Matter.objects.filter(firm=self.firm).count() + 1
-            self.file_number = f"{year}-{sequence:06d}"
-        super().save(*args, **kwargs)
+            from apps.firms.models import Firm
+            with transaction.atomic():
+                # Lock the firm row to serialise concurrent file-number generation.
+                Firm.objects.select_for_update().get(pk=self.firm_id)
+                year = datetime.date.today().year
+                sequence = Matter.objects.filter(firm_id=self.firm_id).count() + 1
+                self.file_number = f"{year}-{sequence:06d}"
+                super().save(*args, **kwargs)
+        else:
+            super().save(*args, **kwargs)
