@@ -2,8 +2,9 @@ import datetime
 
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.http import Http404
-from django.shortcuts import get_object_or_404, redirect
+from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy, reverse
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, TemplateView, FormView
@@ -58,12 +59,10 @@ class ReceiptCreateView(StaffRequiredMixin, View):
         return get_object_or_404(MatterLedger, pk=self.kwargs['ledger_pk'])
 
     def get(self, request, ledger_pk):
-        from django.shortcuts import render
         form = ReceiptForm()
         return render(request, self.template_name, {'form': form, 'ledger': self.get_ledger()})
 
     def post(self, request, ledger_pk):
-        from django.shortcuts import render
         ledger = self.get_ledger()
         form = ReceiptForm(request.POST)
         if form.is_valid():
@@ -100,12 +99,10 @@ class PaymentCreateView(StaffRequiredMixin, View):
         return get_object_or_404(MatterLedger, pk=self.kwargs['ledger_pk'])
 
     def get(self, request, ledger_pk):
-        from django.shortcuts import render
         form = PaymentForm()
         return render(request, self.template_name, {'form': form, 'ledger': self.get_ledger()})
 
     def post(self, request, ledger_pk):
-        from django.shortcuts import render
         ledger = self.get_ledger()
         form = PaymentForm(request.POST)
         if form.is_valid():
@@ -142,14 +139,12 @@ class TrustJournalCreateView(AdminOrAccountantMixin, View):
         return None
 
     def get(self, request):
-        from django.shortcuts import render
         trust_account = self.get_trust_account()
         form = TrustJournalForm(trust_account=trust_account)
         accounts = TrustAccount.objects.filter(is_active=True)
         return render(request, self.template_name, {'form': form, 'accounts': accounts, 'trust_account': trust_account})
 
     def post(self, request):
-        from django.shortcuts import render
         trust_account = self.get_trust_account()
         form = TrustJournalForm(request.POST, request.FILES, trust_account=trust_account)
         accounts = TrustAccount.objects.filter(is_active=True)
@@ -184,9 +179,8 @@ class ReverseTransactionView(AdminOrAccountantMixin, View):
             messages.success(request, 'Transaction reversed successfully.')
         except (ValidationError, Exception) as e:
             messages.error(request, str(e))
-        referer = request.META.get('HTTP_REFERER', '/')
-        safe_next = referer if referer.startswith('/') else '/'
-        return redirect(safe_next)
+        ledger = txn.matter_ledger
+        return redirect(reverse('trust:account_detail', kwargs={'pk': ledger.trust_account_id}))
 
 
 class ReconciliationListView(StaffRequiredMixin, ListView):
@@ -252,14 +246,12 @@ class IrregularityDetailView(StaffRequiredMixin, View):
         return get_object_or_404(Irregularity, pk=pk)
 
     def get(self, request, pk):
-        from django.shortcuts import render
         irr = self.get_irregularity(pk)
         can_resolve = request.user.role in ('admin', 'accountant')
         form = IrregularityResolveForm(instance=irr) if can_resolve else None
         return render(request, self.template_name, {'irregularity': irr, 'form': form, 'can_resolve': can_resolve})
 
     def post(self, request, pk):
-        from django.shortcuts import render
         irr = self.get_irregularity(pk)
         can_resolve = request.user.role in ('admin', 'accountant')
         if not can_resolve:
@@ -271,7 +263,6 @@ class IrregularityDetailView(StaffRequiredMixin, View):
             messages.success(request, 'Irregularity updated.')
             return redirect(reverse('trust:irregularity_list'))
         return render(request, self.template_name, {'irregularity': irr, 'form': form, 'can_resolve': can_resolve})
-
 
 class ReportsLandingView(StaffRequiredMixin, TemplateView):
     template_name = 'trust/reports.html'

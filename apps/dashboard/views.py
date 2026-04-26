@@ -1,7 +1,7 @@
 from decimal import Decimal
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.db.models import Q, Sum
 from django.views.generic import TemplateView
-from django.db.models import Sum
 
 from apps.matters.models import Matter
 from apps.trust.models import TrustAccount, MatterLedger, MonthlyReconciliation, Irregularity
@@ -18,7 +18,9 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             trust_accounts = TrustAccount.objects.filter(is_active=True).count()
             total_balance = MatterLedger.objects.aggregate(t=Sum('balance'))['t'] or Decimal('0.00')
             unreconciled = MonthlyReconciliation.objects.filter(is_reconciled=False).count()
-            open_irregularities = Irregularity.objects.filter(resolution='').count()
+            open_irregularities = Irregularity.objects.filter(
+                Q(resolution='') | Q(resolution__isnull=True)
+            ).count()
         else:
             firm = user.firm
             if firm:
@@ -31,7 +33,8 @@ class DashboardView(LoginRequiredMixin, TemplateView):
                     is_reconciled=False, trust_account__firm=firm
                 ).count()
                 open_irregularities = Irregularity.objects.filter(
-                    resolution='', trust_account__firm=firm
+                    Q(resolution='') | Q(resolution__isnull=True),
+                    trust_account__firm=firm,
                 ).count()
             else:
                 open_matters = trust_accounts = unreconciled = open_irregularities = 0

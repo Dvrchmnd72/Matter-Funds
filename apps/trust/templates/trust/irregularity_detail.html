@@ -13,7 +13,7 @@
 {% if can_resolve %}
 <h2 class="mt-4">Update Resolution</h2>
 <div class="row"><div class="col-md-8">
-  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form|crispy }}</form>
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form|crispy }}<button type="submit" class="btn btn-primary">Save Resolution</button></form>
 </div></div>
 {% endif %}
 <a href="{% url 'trust:irregularity_list' %}" class="btn btn-secondary mt-3">Back</a>

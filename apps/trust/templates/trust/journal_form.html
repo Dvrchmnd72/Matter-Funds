@@ -19,6 +19,7 @@
     {% csrf_token %}
     <input type="hidden" name="trust_account" value="{{ trust_account.pk }}">
     {{ form|crispy }}
+    <button type="submit" class="btn btn-primary">Save Journal</button>
   </form>
 </div></div>
 {% endif %}
