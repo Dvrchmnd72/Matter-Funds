@@ -25,6 +25,11 @@ INSTALLED_APPS = [
     'django_extensions',
     # Local
     'apps.accounts',
+    'apps.firms',
+    'apps.clients',
+    'apps.matters',
+    'apps.trust',
+    'apps.audit',
 ]
 
 MIDDLEWARE = [

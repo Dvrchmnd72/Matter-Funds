@@ -120,3 +120,31 @@ python manage.py runserver
 - **django-allauth** — authentication (ready to configure)
 - **crispy-forms** + crispy-bootstrap5 — form rendering
 
+- **reportlab** — PDF generation
+- **openpyxl** — Excel export
+
+---
+
+## Compliance mapping (NSW)
+
+This phase implements the Legal Profession Uniform General Rules 2015 (NSW) as
+described in the Law Society of NSW Legal Accounting Handbook (8th Ed., Jan 2020).
+
+| Rule | Where it lives |
+|------|----------------|
+| R36–R38 Receipts | apps/trust/models.py::Receipt + services.create_receipt |
+| R39 Trust journals | apps/trust/models.py::TrustJournal + services.create_trust_journal |
+| R41 Banking timing | Receipt.late_banking flag |
+| R42 Irregularities | apps/trust/models.py::Irregularity (auto-created on failed recon) |
+| R43–R45 Payments | apps/trust/models.py::Payment + services.create_payment |
+| R44 EFT dual auth | Payment.clean() |
+| R45 Trust ledger | apps/trust/models.py::MatterLedger |
+| R47 Monthly recon | apps/trust/models.py::MonthlyReconciliation |
+| R50–R54 Controlled money | apps/trust/models.py::ControlledMoneyAccount |
+| R55 Transit money | apps/trust/models.py::TransitMoneyEntry |
+| R56 Power money | apps/trust/models.py::PowerMoneyEntry |
+| R53 7-year retention | Soft-delete only; hard-delete forbidden in admin |
+| R66–R75 External examiner | apps/trust/reports.py::external_examiner_pack_zip |
+
+Other Australian states (VIC, QLD, WA, SA, TAS, ACT, NT) will be added in later phases.
+The `Firm.jurisdiction` field is the future hook for state-specific rule sets.
