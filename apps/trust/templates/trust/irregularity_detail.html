@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block title %}Irregularity – Matter Funds{% endblock %}
+{% block content %}
+<h1>Irregularity – {{ irregularity.discovered_on }}</h1>
+<dl class="row">
+  <dt class="col-sm-3">Trust Account</dt><dd class="col-sm-9">{{ irregularity.trust_account }}</dd>
+  <dt class="col-sm-3">Amount</dt><dd class="col-sm-9">${{ irregularity.amount }}</dd>
+  <dt class="col-sm-3">Description</dt><dd class="col-sm-9">{{ irregularity.description }}</dd>
+  <dt class="col-sm-3">Resolution</dt><dd class="col-sm-9">{{ irregularity.resolution|default:"–" }}</dd>
+  <dt class="col-sm-3">Reported</dt><dd class="col-sm-9">{{ irregularity.reported_to_law_society_on|default:"–" }}</dd>
+</dl>
+{% if can_resolve %}
+<h2 class="mt-4">Update Resolution</h2>
+<div class="row"><div class="col-md-8">
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form|crispy }}<button type="submit" class="btn btn-primary">Save Resolution</button></form>
+</div></div>
+{% endif %}
+<a href="{% url 'trust:irregularity_list' %}" class="btn btn-secondary mt-3">Back</a>
+{% endblock %}

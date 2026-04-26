@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Irregularities – Matter Funds{% endblock %}
+{% block content %}
+<h1 class="mb-4">Irregularities</h1>
+<table class="table table-striped">
+  <thead><tr><th>Discovered</th><th>Account</th><th>Amount</th><th>Resolved</th></tr></thead>
+  <tbody>
+    {% for irr in irregularities %}
+    <tr>
+      <td><a href="{% url 'trust:irregularity_detail' irr.pk %}">{{ irr.discovered_on }}</a></td>
+      <td>{{ irr.trust_account }}</td>
+      <td>${{ irr.amount }}</td>
+      <td>
+        <span class="badge {% if irr.resolution %}bg-success{% else %}bg-danger{% endif %}">
+          {{ irr.resolution|yesno:"Resolved,Open"|default:"Open" }}
+        </span>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="4">No irregularities found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

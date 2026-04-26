@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}{{ firm.name }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>{{ firm.name }}</h1>
+<dl class="row">
+  <dt class="col-sm-3">ABN</dt><dd class="col-sm-9">{{ firm.abn }}</dd>
+  <dt class="col-sm-3">Address</dt><dd class="col-sm-9">{{ firm.address }}</dd>
+  <dt class="col-sm-3">Principal Solicitor</dt><dd class="col-sm-9">{{ firm.principal_solicitor }}</dd>
+  <dt class="col-sm-3">Sole Practitioner</dt><dd class="col-sm-9">{{ firm.is_sole_practitioner|yesno:"Yes,No" }}</dd>
+  <dt class="col-sm-3">Jurisdiction</dt><dd class="col-sm-9">{{ firm.get_jurisdiction_display }}</dd>
+</dl>
+<a href="{% url 'firms:firm_list' %}" class="btn btn-secondary">Back</a>
+{% endblock %}

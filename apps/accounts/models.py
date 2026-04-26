@@ -14,6 +14,13 @@ class User(AbstractUser):
 
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='client')
     phone = models.CharField(max_length=20, blank=True)
+    firm = models.ForeignKey(
+        'firms.Firm',
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='members',
+    )
 
     class Meta:
         verbose_name = 'User'

@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ account.name }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>{{ account.name }}</h1>
+<dl class="row">
+  <dt class="col-sm-3">Firm</dt><dd class="col-sm-9">{{ account.firm }}</dd>
+  <dt class="col-sm-3">Bank</dt><dd class="col-sm-9">{{ account.bank }}</dd>
+  <dt class="col-sm-3">BSB</dt><dd class="col-sm-9">{{ account.bsb }}</dd>
+  <dt class="col-sm-3">Account #</dt><dd class="col-sm-9">{{ account.account_number }}</dd>
+</dl>
+<div class="d-flex gap-2 mb-4">
+  <a href="{% url 'trust:journal_create' %}?trust_account={{ account.pk }}" class="btn btn-secondary">New Journal</a>
+  <a href="{% url 'trust:reconciliation_create' account.pk %}" class="btn btn-outline-primary">New Reconciliation</a>
+  <a href="{% url 'trust:reports' %}" class="btn btn-outline-secondary">Reports</a>
+</div>
+<h2>Ledgers</h2>
+<table class="table table-striped mb-4">
+  <thead><tr><th>Matter</th><th>Balance</th><th>Actions</th></tr></thead>
+  <tbody>
+    {% for ledger in ledgers %}
+    <tr>
+      <td>{{ ledger.matter }}</td>
+      <td>${{ ledger.balance }}</td>
+      <td>
+        <a href="{% url 'trust:receipt_create' ledger.pk %}" class="btn btn-success btn-sm">Receipt</a>
+        <a href="{% url 'trust:payment_create' ledger.pk %}" class="btn btn-warning btn-sm">Payment</a>
+        <a href="{% url 'trust:ledger_statement_pdf' ledger.pk %}" class="btn btn-outline-info btn-sm">Statement PDF</a>
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="3">No ledgers.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+<h2>Recent Transactions</h2>
+<table class="table table-sm">
+  <thead><tr><th>Date</th><th>Type</th><th>Matter</th><th>Description</th><th>Amount</th></tr></thead>
+  <tbody>
+    {% for txn in recent_transactions %}
+    <tr>
+      <td>{{ txn.date_received_or_paid }}</td>
+      <td>{{ txn.get_transaction_type_display }}</td>
+      <td>{{ txn.matter_ledger.matter }}</td>
+      <td>{{ txn.description }}</td>
+      <td>${{ txn.amount }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="5">No transactions.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -7,23 +7,55 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
 </head>
 <body>
-    <nav class="navbar navbar-dark bg-dark">
-        <div class="container">
-            <a class="navbar-brand" href="/">Matter Funds</a>
-            <a class="btn btn-outline-light btn-sm" href="/admin/">Admin</a>
-        </div>
-    </nav>
-    <main class="container mt-4">
-        {% if messages %}
-            {% for message in messages %}
-                <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
-                    {{ message }}
-                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                </div>
-            {% endfor %}
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container">
+    <a class="navbar-brand fw-bold" href="/">Matter Funds</a>
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarMain">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+    <div class="collapse navbar-collapse" id="navbarMain">
+      {% if request.user.is_authenticated %}
+      <ul class="navbar-nav me-auto">
+        <li class="nav-item"><a class="nav-link" href="/dashboard/">Dashboard</a></li>
+        <li class="nav-item"><a class="nav-link" href="/matters/">Matters</a></li>
+        <li class="nav-item"><a class="nav-link" href="/clients/">Clients</a></li>
+        <li class="nav-item"><a class="nav-link" href="/trust/accounts/">Trust Accounts</a></li>
+        <li class="nav-item"><a class="nav-link" href="/trust/reconciliations/">Reconciliations</a></li>
+        <li class="nav-item"><a class="nav-link" href="/trust/reports/">Reports</a></li>
+        <li class="nav-item"><a class="nav-link" href="/trust/irregularities/">Irregularities</a></li>
+        {% if request.user.role == 'admin' %}
+        <li class="nav-item"><a class="nav-link" href="/admin/">Admin</a></li>
         {% endif %}
-        {% block content %}{% endblock %}
-    </main>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+      </ul>
+      <ul class="navbar-nav ms-auto">
+        <li class="nav-item dropdown">
+          <a class="nav-link dropdown-toggle" href="#" id="userMenu" role="button" data-bs-toggle="dropdown">
+            {{ request.user.get_username }}
+          </a>
+          <ul class="dropdown-menu dropdown-menu-end">
+            <li><a class="dropdown-item" href="/accounts/logout/">Logout</a></li>
+          </ul>
+        </li>
+      </ul>
+      {% else %}
+      <ul class="navbar-nav ms-auto">
+        <li class="nav-item"><a class="nav-link" href="/accounts/login/">Login</a></li>
+      </ul>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+<main class="container mt-4">
+    {% if messages %}
+        {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+    {% block content %}{% endblock %}
+</main>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

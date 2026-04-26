@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Logout – Matter Funds{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-5 text-center">
+    <h2>Sign Out</h2>
+    <p>Are you sure you want to sign out?</p>
+    <form method="post">
+      {% csrf_token %}
+      <button type="submit" class="btn btn-danger">Sign Out</button>
+      <a href="/" class="btn btn-secondary ms-2">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}
