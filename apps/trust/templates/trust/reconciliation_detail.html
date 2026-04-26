@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Reconciliation {{ reconciliation.period_end }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>Reconciliation – {{ reconciliation.period_end }}</h1>
+<dl class="row">
+  <dt class="col-sm-4">Trust Account</dt><dd class="col-sm-8">{{ reconciliation.trust_account }}</dd>
+  <dt class="col-sm-4">Cash Book Balance</dt><dd class="col-sm-8">${{ reconciliation.cash_book_balance }}</dd>
+  <dt class="col-sm-4">Ledger Total Balance</dt><dd class="col-sm-8">${{ reconciliation.ledger_total_balance }}</dd>
+  <dt class="col-sm-4">Bank Statement Balance</dt><dd class="col-sm-8">${{ reconciliation.bank_statement_balance }}</dd>
+  <dt class="col-sm-4">Unpresented Cheques</dt><dd class="col-sm-8">${{ reconciliation.unpresented_cheques_total }}</dd>
+  <dt class="col-sm-4">Outstanding Deposits</dt><dd class="col-sm-8">${{ reconciliation.outstanding_deposits_total }}</dd>
+  <dt class="col-sm-4">Reconciled Balance</dt><dd class="col-sm-8">${{ reconciliation.reconciled_balance }}</dd>
+  <dt class="col-sm-4">Status</dt>
+  <dd class="col-sm-8">
+    <span class="badge {% if reconciliation.is_reconciled %}bg-success{% else %}bg-danger{% endif %}">
+      {{ reconciliation.is_reconciled|yesno:"Reconciled,Not Reconciled" }}
+    </span>
+  </dd>
+</dl>
+<a href="{% url 'trust:reconciliation_pdf' reconciliation.pk %}" class="btn btn-primary">Download PDF</a>
+<a href="{% url 'trust:reconciliation_list' %}" class="btn btn-secondary">Back</a>
+{% endblock %}

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ matter }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>{{ matter.description }}</h1>
+<dl class="row">
+  <dt class="col-sm-3">File Number</dt><dd class="col-sm-9">{{ matter.file_number }}</dd>
+  <dt class="col-sm-3">Client</dt><dd class="col-sm-9">{{ matter.client }}</dd>
+  <dt class="col-sm-3">Responsible Lawyer</dt><dd class="col-sm-9">{{ matter.responsible_lawyer }}</dd>
+  <dt class="col-sm-3">Status</dt><dd class="col-sm-9">{{ matter.get_status_display }}</dd>
+  <dt class="col-sm-3">Opened On</dt><dd class="col-sm-9">{{ matter.opened_on }}</dd>
+</dl>
+
+<div class="d-flex justify-content-between align-items-center mt-4 mb-2">
+  <h2>Trust Ledgers</h2>
+  <a href="{% url 'matters:ledger_create' matter.pk %}" class="btn btn-primary btn-sm">Add Ledger</a>
+</div>
+{% for ledger in ledgers %}
+<div class="card mb-3">
+  <div class="card-header d-flex justify-content-between">
+    <strong>{{ ledger.trust_account }}</strong>
+    <span>Balance: ${{ ledger.balance }}</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="d-flex gap-2 p-2">
+      <a href="{% url 'trust:receipt_create' ledger.pk %}" class="btn btn-success btn-sm">Receipt</a>
+      <a href="{% url 'trust:payment_create' ledger.pk %}" class="btn btn-warning btn-sm">Payment</a>
+    </div>
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Date</th><th>Type</th><th>Description</th><th>Amount</th><th>Reversed</th><th></th></tr></thead>
+      <tbody>
+        {% for txn in ledger.transactions.all %}
+        <tr>
+          <td>{{ txn.date_received_or_paid }}</td>
+          <td>{{ txn.get_transaction_type_display }}</td>
+          <td>{{ txn.description }}</td>
+          <td>${{ txn.amount }}</td>
+          <td>{{ txn.is_reversed|yesno:"Yes,No" }}</td>
+          <td>
+            {% if not txn.is_reversed %}
+            <form method="post" action="{% url 'trust:transaction_reverse' txn.pk %}">
+              {% csrf_token %}
+              <input type="hidden" name="reason" value="Manual reversal">
+              <button class="btn btn-danger btn-sm">Reverse</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">No transactions.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% empty %}
+<p>No ledgers yet.</p>
+{% endfor %}
+<a href="{% url 'matters:matter_list' %}" class="btn btn-secondary mt-2">Back</a>
+{% endblock %}

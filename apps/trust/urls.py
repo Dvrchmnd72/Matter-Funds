@@ -1,4 +1,26 @@
 from django.urls import path
+from . import views
 
 app_name = 'trust'
-urlpatterns = []
+urlpatterns = [
+    path('accounts/', views.TrustAccountListView.as_view(), name='account_list'),
+    path('accounts/<int:pk>/', views.TrustAccountDetailView.as_view(), name='account_detail'),
+    path('ledgers/<int:ledger_pk>/receipts/new/', views.ReceiptCreateView.as_view(), name='receipt_create'),
+    path('receipts/<int:pk>/', views.ReceiptDetailView.as_view(), name='receipt_detail'),
+    path('ledgers/<int:ledger_pk>/payments/new/', views.PaymentCreateView.as_view(), name='payment_create'),
+    path('journals/new/', views.TrustJournalCreateView.as_view(), name='journal_create'),
+    path('transactions/<int:pk>/reverse/', views.ReverseTransactionView.as_view(), name='transaction_reverse'),
+    path('reconciliations/', views.ReconciliationListView.as_view(), name='reconciliation_list'),
+    path('accounts/<int:pk>/reconciliations/new/', views.ReconciliationCreateView.as_view(), name='reconciliation_create'),
+    path('reconciliations/<int:pk>/', views.ReconciliationDetailView.as_view(), name='reconciliation_detail'),
+    path('irregularities/', views.IrregularityListView.as_view(), name='irregularity_list'),
+    path('irregularities/<int:pk>/', views.IrregularityDetailView.as_view(), name='irregularity_detail'),
+    path('reports/', views.ReportsLandingView.as_view(), name='reports'),
+    path('accounts/<int:pk>/reports/receipts-journal/', views.ReceiptsJournalPDFView.as_view(), name='receipts_journal_pdf'),
+    path('accounts/<int:pk>/reports/payments-journal/', views.PaymentsJournalPDFView.as_view(), name='payments_journal_pdf'),
+    path('accounts/<int:pk>/reports/trial-balance/', views.TrialBalancePDFView.as_view(), name='trial_balance_pdf'),
+    path('accounts/<int:pk>/reports/examiner-pack/', views.ExaminerPackZipView.as_view(), name='examiner_pack'),
+    path('ledgers/<int:pk>/reports/statement/', views.LedgerStatementPDFView.as_view(), name='ledger_statement_pdf'),
+    path('reconciliations/<int:pk>/reports/pdf/', views.ReconciliationPDFView.as_view(), name='reconciliation_pdf'),
+    path('receipts/<int:pk>/pdf/', views.ReceiptPDFView.as_view(), name='receipt_pdf'),
+]

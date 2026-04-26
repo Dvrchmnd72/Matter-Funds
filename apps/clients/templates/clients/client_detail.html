@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>{{ client.name }}</h1>
+<dl class="row">
+  <dt class="col-sm-3">Type</dt><dd class="col-sm-9">{{ client.get_client_type_display }}</dd>
+  <dt class="col-sm-3">Firm</dt><dd class="col-sm-9">{{ client.firm }}</dd>
+  <dt class="col-sm-3">Email</dt><dd class="col-sm-9">{{ client.email }}</dd>
+  <dt class="col-sm-3">Phone</dt><dd class="col-sm-9">{{ client.phone }}</dd>
+  <dt class="col-sm-3">Address</dt><dd class="col-sm-9">{{ client.address }}</dd>
+  <dt class="col-sm-3">ABN/ACN</dt><dd class="col-sm-9">{{ client.abn_acn }}</dd>
+</dl>
+<a href="{% url 'clients:client_list' %}" class="btn btn-secondary">Back</a>
+{% endblock %}

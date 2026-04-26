@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Confirm Email – Matter Funds{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-md-6 text-center">
+    <h2>Confirm Email Address</h2>
+    {% if confirmation %}
+    <p>Please confirm that <strong>{{ confirmation.email_address.email }}</strong> is your email address.</p>
+    <form method="post">{% csrf_token %}
+      <button type="submit" class="btn btn-primary">Confirm</button>
+    </form>
+    {% else %}
+    <div class="alert alert-warning">This confirmation link is invalid or has expired.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

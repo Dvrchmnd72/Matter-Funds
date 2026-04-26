@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Reconciliations – Matter Funds{% endblock %}
+{% block content %}
+<h1 class="mb-4">Monthly Reconciliations</h1>
+<table class="table table-striped">
+  <thead><tr><th>Period End</th><th>Account</th><th>Reconciled?</th><th>Actions</th></tr></thead>
+  <tbody>
+    {% for recon in reconciliations %}
+    <tr>
+      <td><a href="{% url 'trust:reconciliation_detail' recon.pk %}">{{ recon.period_end }}</a></td>
+      <td>{{ recon.trust_account }}</td>
+      <td><span class="badge {% if recon.is_reconciled %}bg-success{% else %}bg-danger{% endif %}">{{ recon.is_reconciled|yesno:"Yes,No" }}</span></td>
+      <td><a href="{% url 'trust:reconciliation_pdf' recon.pk %}" class="btn btn-sm btn-outline-secondary">PDF</a></td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="4">No reconciliations found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

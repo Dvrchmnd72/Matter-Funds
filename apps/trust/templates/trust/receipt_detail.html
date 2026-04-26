@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Receipt #{{ receipt.receipt_number }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>Receipt #{{ receipt.receipt_number }}</h1>
+<dl class="row">
+  <dt class="col-sm-3">Payor</dt><dd class="col-sm-9">{{ receipt.payor_name }}</dd>
+  <dt class="col-sm-3">Amount</dt><dd class="col-sm-9">${{ receipt.transaction.amount }}</dd>
+  <dt class="col-sm-3">Date Received</dt><dd class="col-sm-9">{{ receipt.transaction.date_received_or_paid }}</dd>
+  <dt class="col-sm-3">Date Banked</dt><dd class="col-sm-9">{{ receipt.transaction.date_banked|default:"–" }}</dd>
+  <dt class="col-sm-3">Payment Method</dt><dd class="col-sm-9">{{ receipt.get_payment_method_display }}</dd>
+  <dt class="col-sm-3">Purpose</dt><dd class="col-sm-9">{{ receipt.purpose }}</dd>
+  <dt class="col-sm-3">Late Banking</dt><dd class="col-sm-9">{{ receipt.late_banking|yesno:"Yes,No" }}</dd>
+  <dt class="col-sm-3">Matter</dt><dd class="col-sm-9">{{ receipt.transaction.matter_ledger.matter }}</dd>
+</dl>
+<a href="{% url 'trust:receipt_pdf' receipt.pk %}" class="btn btn-primary">Download PDF</a>
+<a href="{% url 'trust:account_detail' receipt.transaction.matter_ledger.trust_account.pk %}" class="btn btn-secondary">Back to Account</a>
+{% endblock %}

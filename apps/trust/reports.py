@@ -264,3 +264,45 @@ def external_examiner_pack_zip(trust_account, year):
     response = HttpResponse(zip_buffer.getvalue(), content_type='application/zip')
     response['Content-Disposition'] = f'attachment; filename="external_examiner_pack_{year}.zip"'
     return response
+
+
+def receipt_pdf(receipt):
+    """Generate a PDF for a single trust receipt."""
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+    trust_account = receipt.transaction.matter_ledger.trust_account
+    buffer = io.BytesIO()
+    styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+    elements = []
+    elements.append(Paragraph(f"Trust Receipt #{receipt.receipt_number}", styles['Heading1']))
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, styles['Normal']))
+    elements.append(Spacer(1, 0.5*cm))
+    details = [
+        ['Receipt Number', str(receipt.receipt_number)],
+        ['Date Received', str(receipt.transaction.date_received_or_paid)],
+        ['Date Banked', str(receipt.transaction.date_banked or '')],
+        ['Payor', receipt.payor_name],
+        ['Payment Method', receipt.get_payment_method_display()],
+        ['Cheque Number', receipt.cheque_number],
+        ['Purpose', receipt.purpose],
+        ['Amount', f"${receipt.transaction.amount}"],
+        ['Matter', str(receipt.transaction.matter_ledger.matter)],
+        ['Late Banking', 'Yes' if receipt.late_banking else 'No'],
+    ]
+    t = Table(details)
+    t.setStyle(TableStyle([
+        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 10),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('PADDING', (0, 0), (-1, -1), 6),
+    ]))
+    elements.append(t)
+    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles['Italic']))
+    doc.build(elements)
+    response = _make_pdf_response(f'receipt_{receipt.receipt_number}.pdf')
+    response.write(buffer.getvalue())
+    return response

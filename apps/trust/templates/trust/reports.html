@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block title %}Reports – Matter Funds{% endblock %}
+{% block content %}
+<h1 class="mb-4">Trust Reports</h1>
+{% for account in accounts %}
+<div class="card mb-4">
+  <div class="card-header"><strong>{{ account.name }}</strong></div>
+  <div class="card-body">
+    <h5>Journals (select date range)</h5>
+    <form method="get" action="{% url 'trust:receipts_journal_pdf' account.pk %}" class="row g-2 mb-2">
+      <div class="col-auto"><input type="date" name="date_from" class="form-control form-control-sm" placeholder="From"></div>
+      <div class="col-auto"><input type="date" name="date_to" class="form-control form-control-sm" placeholder="To"></div>
+      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Receipts Journal PDF</button></div>
+    </form>
+    <form method="get" action="{% url 'trust:payments_journal_pdf' account.pk %}" class="row g-2 mb-2">
+      <div class="col-auto"><input type="date" name="date_from" class="form-control form-control-sm" placeholder="From"></div>
+      <div class="col-auto"><input type="date" name="date_to" class="form-control form-control-sm" placeholder="To"></div>
+      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Payments Journal PDF</button></div>
+    </form>
+    <div class="d-flex gap-2">
+      <a href="{% url 'trust:trial_balance_pdf' account.pk %}" class="btn btn-sm btn-outline-secondary">Trial Balance PDF</a>
+    </div>
+    <h5 class="mt-3">Examiner Pack (select year)</h5>
+    <form method="get" action="{% url 'trust:examiner_pack' account.pk %}" class="row g-2">
+      <div class="col-auto"><input type="number" name="year" class="form-control form-control-sm" value="{{ year_form.year.value }}" min="2000" max="2100"></div>
+      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-dark">Download ZIP</button></div>
+    </form>
+  </div>
+</div>
+{% empty %}
+<p>No trust accounts found.</p>
+{% endfor %}
+{% endblock %}

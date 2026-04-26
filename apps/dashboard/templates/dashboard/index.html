@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – Matter Funds{% endblock %}
+{% block content %}
+<h1 class="mb-4">Dashboard</h1>
+<div class="row g-4">
+  <div class="col-sm-6 col-lg-3">
+    <div class="card text-bg-primary h-100">
+      <div class="card-body">
+        <h5 class="card-title">Open Matters</h5>
+        <p class="display-4">{{ open_matters }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card text-bg-success h-100">
+      <div class="card-body">
+        <h5 class="card-title">Trust Accounts</h5>
+        <p class="display-4">{{ trust_accounts }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card text-bg-info h-100">
+      <div class="card-body">
+        <h5 class="card-title">Total Trust Balance</h5>
+        <p class="display-6">${{ total_balance }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card {% if unreconciled > 0 %}text-bg-warning{% else %}text-bg-secondary{% endif %} h-100">
+      <div class="card-body">
+        <h5 class="card-title">Unreconciled Months</h5>
+        <p class="display-4">{{ unreconciled }}</p>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-lg-3">
+    <div class="card {% if open_irregularities > 0 %}text-bg-danger{% else %}text-bg-secondary{% endif %} h-100">
+      <div class="card-body">
+        <h5 class="card-title">Open Irregularities</h5>
+        <p class="display-4">{{ open_irregularities }}</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

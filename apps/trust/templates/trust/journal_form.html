@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block title %}New Journal – Matter Funds{% endblock %}
+{% block content %}
+<h1>New Trust Journal</h1>
+{% if not trust_account %}
+<div class="mb-3">
+  <label class="form-label">Select Trust Account:</label>
+  <div class="d-flex gap-2 flex-wrap">
+    {% for acct in accounts %}
+    <a href="?trust_account={{ acct.pk }}" class="btn btn-outline-primary btn-sm">{{ acct.name }}</a>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<p class="text-muted">Account: <strong>{{ trust_account }}</strong></p>
+<div class="row"><div class="col-md-8">
+  <form method="post" enctype="multipart/form-data">
+    {% csrf_token %}
+    <input type="hidden" name="trust_account" value="{{ trust_account.pk }}">
+    {{ form|crispy }}
+  </form>
+</div></div>
+{% endif %}
+{% endblock %}

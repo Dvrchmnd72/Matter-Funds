@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Trust Accounts – Matter Funds{% endblock %}
+{% block content %}
+<h1 class="mb-4">Trust Accounts</h1>
+<table class="table table-striped">
+  <thead><tr><th>Name</th><th>Firm</th><th>BSB</th><th>Account #</th><th>Active</th></tr></thead>
+  <tbody>
+    {% for account in accounts %}
+    <tr>
+      <td><a href="{% url 'trust:account_detail' account.pk %}">{{ account.name }}</a></td>
+      <td>{{ account.firm }}</td>
+      <td>{{ account.bsb }}</td>
+      <td>{{ account.account_number }}</td>
+      <td>{{ account.is_active|yesno:"Yes,No" }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="5">No trust accounts found.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
