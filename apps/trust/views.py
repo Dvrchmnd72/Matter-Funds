@@ -23,23 +23,44 @@ from .forms import (
 )
 
 
+def user_has_global_trust_access(user):
+    return getattr(user, 'is_superuser', False) or (
+        getattr(user, 'is_staff', False) and getattr(user, 'role', None) == 'admin'
+    )
+
+
+def scope_trust_queryset_for_user(queryset, user, firm_lookup='trust_account__firm'):
+    if user_has_global_trust_access(user):
+        return queryset
+    if getattr(user, 'firm_id', None):
+        return queryset.filter(**{firm_lookup: user.firm})
+    return queryset.none()
+
+
 class TrustAccountListView(StaffRequiredMixin, ListView):
     model = TrustAccount
     template_name = 'trust/account_list.html'
     context_object_name = 'accounts'
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related('firm')
-        user = self.request.user
-        if user.role != 'admin' and user.firm:
-            qs = qs.filter(firm=user.firm)
-        return qs
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('firm'),
+            self.request.user,
+            firm_lookup='firm',
+        )
 
 
 class TrustAccountDetailView(StaffRequiredMixin, DetailView):
     model = TrustAccount
     template_name = 'trust/account_detail.html'
     context_object_name = 'account'
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('firm'),
+            self.request.user,
+            firm_lookup='firm',
+        )
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -57,7 +78,11 @@ class ReceiptCreateView(StaffRequiredMixin, View):
     template_name = 'trust/receipt_form.html'
 
     def get_ledger(self):
-        return get_object_or_404(MatterLedger, pk=self.kwargs['ledger_pk'])
+        queryset = scope_trust_queryset_for_user(
+            MatterLedger.objects.select_related('trust_account', 'matter'),
+            self.request.user,
+        )
+        return get_object_or_404(queryset, pk=self.kwargs['ledger_pk'])
 
     def get(self, request, ledger_pk):
         form = ReceiptForm()
@@ -92,12 +117,23 @@ class ReceiptDetailView(StaffRequiredMixin, DetailView):
     template_name = 'trust/receipt_detail.html'
     context_object_name = 'receipt'
 
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('transaction__matter_ledger__trust_account'),
+            self.request.user,
+            firm_lookup='transaction__matter_ledger__trust_account__firm',
+        )
+
 
 class PaymentCreateView(StaffRequiredMixin, View):
     template_name = 'trust/payment_form.html'
 
     def get_ledger(self):
-        return get_object_or_404(MatterLedger, pk=self.kwargs['ledger_pk'])
+        queryset = scope_trust_queryset_for_user(
+            MatterLedger.objects.select_related('trust_account', 'matter'),
+            self.request.user,
+        )
+        return get_object_or_404(queryset, pk=self.kwargs['ledger_pk'])
 
     def get(self, request, ledger_pk):
         form = PaymentForm()
@@ -134,7 +170,11 @@ class TransferCostsToOfficeCreateView(AdminOrAccountantMixin, View):
     template_name = 'trust/transfer_costs_to_office_form.html'
 
     def get_ledger(self):
-        return get_object_or_404(MatterLedger, pk=self.kwargs['ledger_pk'])
+        queryset = scope_trust_queryset_for_user(
+            MatterLedger.objects.select_related('trust_account', 'matter'),
+            self.request.user,
+        )
+        return get_object_or_404(queryset, pk=self.kwargs['ledger_pk'])
 
     def get(self, request, ledger_pk):
         form = TransferCostsToOfficeForm()
@@ -180,19 +220,32 @@ class TrustJournalCreateView(AdminOrAccountantMixin, View):
     def get_trust_account(self):
         ta_pk = self.request.GET.get('trust_account') or self.request.POST.get('trust_account')
         if ta_pk:
-            return get_object_or_404(TrustAccount, pk=ta_pk)
+            queryset = scope_trust_queryset_for_user(
+                TrustAccount.objects.all(),
+                self.request.user,
+                firm_lookup='firm',
+            )
+            return get_object_or_404(queryset, pk=ta_pk)
         return None
 
     def get(self, request):
         trust_account = self.get_trust_account()
         form = TrustJournalForm(trust_account=trust_account)
-        accounts = TrustAccount.objects.filter(is_active=True)
+        accounts = scope_trust_queryset_for_user(
+            TrustAccount.objects.filter(is_active=True),
+            request.user,
+            firm_lookup='firm',
+        )
         return render(request, self.template_name, {'form': form, 'accounts': accounts, 'trust_account': trust_account})
 
     def post(self, request):
         trust_account = self.get_trust_account()
         form = TrustJournalForm(request.POST, request.FILES, trust_account=trust_account)
-        accounts = TrustAccount.objects.filter(is_active=True)
+        accounts = scope_trust_queryset_for_user(
+            TrustAccount.objects.filter(is_active=True),
+            request.user,
+            firm_lookup='firm',
+        )
         if form.is_valid():
             cd = form.cleaned_data
             try:
@@ -217,7 +270,12 @@ class TrustJournalCreateView(AdminOrAccountantMixin, View):
 
 class ReverseTransactionView(AdminOrAccountantMixin, View):
     def post(self, request, pk):
-        txn = get_object_or_404(TrustTransaction, pk=pk)
+        queryset = scope_trust_queryset_for_user(
+            TrustTransaction.objects.select_related('matter_ledger__trust_account'),
+            request.user,
+            firm_lookup='matter_ledger__trust_account__firm',
+        )
+        txn = get_object_or_404(queryset, pk=pk)
         reason = request.POST.get('reason', 'Manual reversal')
         try:
             services.reverse_transaction(transaction_obj=txn, reason=reason, created_by=request.user)
@@ -235,11 +293,10 @@ class ReconciliationListView(StaffRequiredMixin, ListView):
     ordering = ['-period_end']
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by')
-        user = self.request.user
-        if user.role != 'admin' and user.firm:
-            qs = qs.filter(trust_account__firm=user.firm)
-        return qs
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by'),
+            self.request.user,
+        )
 
 
 class ReconciliationCreateView(AdminOrAccountantMixin, CreateView):
@@ -248,7 +305,8 @@ class ReconciliationCreateView(AdminOrAccountantMixin, CreateView):
     template_name = 'trust/reconciliation_form.html'
 
     def get_trust_account(self):
-        return get_object_or_404(TrustAccount, pk=self.kwargs['pk'])
+        queryset = scope_trust_queryset_for_user(TrustAccount.objects.all(), self.request.user, firm_lookup='firm')
+        return get_object_or_404(queryset, pk=self.kwargs['pk'])
 
     def form_valid(self, form):
         trust_account = self.get_trust_account()
@@ -276,7 +334,10 @@ class ReconciliationDetailView(StaffRequiredMixin, DetailView):
     context_object_name = 'reconciliation'
 
     def get_queryset(self):
-        return super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by')
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by'),
+            self.request.user,
+        )
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -301,7 +362,11 @@ class ReconciliationFinaliseView(AdminOrAccountantMixin, FormView):
     template_name = 'trust/reconciliation_finalise.html'
 
     def get_reconciliation(self):
-        return get_object_or_404(MonthlyReconciliation.objects.select_related('trust_account', 'accounting_period'), pk=self.kwargs['pk'])
+        queryset = scope_trust_queryset_for_user(
+            MonthlyReconciliation.objects.select_related('trust_account', 'accounting_period'),
+            self.request.user,
+        )
+        return get_object_or_404(queryset, pk=self.kwargs['pk'])
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -328,11 +393,10 @@ class AccountingPeriodListView(StaffRequiredMixin, ListView):
     ordering = ['-period_end']
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related('trust_account', 'locked_by')
-        user = self.request.user
-        if user.role != 'admin' and user.firm:
-            qs = qs.filter(trust_account__firm=user.firm)
-        return qs
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('trust_account', 'locked_by'),
+            self.request.user,
+        )
 
 
 class AccountingPeriodDetailView(StaffRequiredMixin, DetailView):
@@ -341,7 +405,10 @@ class AccountingPeriodDetailView(StaffRequiredMixin, DetailView):
     context_object_name = 'period'
 
     def get_queryset(self):
-        return super().get_queryset().select_related('trust_account', 'locked_by').prefetch_related('monthly_records')
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('trust_account', 'locked_by').prefetch_related('monthly_records'),
+            self.request.user,
+        )
 
 
 class AccountingPeriodLockView(AdminOrAccountantMixin, FormView):
@@ -349,7 +416,11 @@ class AccountingPeriodLockView(AdminOrAccountantMixin, FormView):
     template_name = 'trust/period_lock.html'
 
     def get_period(self):
-        return get_object_or_404(TrustAccountingPeriod.objects.select_related('trust_account'), pk=self.kwargs['pk'])
+        queryset = scope_trust_queryset_for_user(
+            TrustAccountingPeriod.objects.select_related('trust_account'),
+            self.request.user,
+        )
+        return get_object_or_404(queryset, pk=self.kwargs['pk'])
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -379,11 +450,10 @@ class MonthlyRecordListView(StaffRequiredMixin, ListView):
     ordering = ['-generated_at']
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related('trust_account', 'accounting_period', 'generated_by')
-        user = self.request.user
-        if user.role != 'admin' and user.firm:
-            qs = qs.filter(trust_account__firm=user.firm)
-        return qs
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('trust_account', 'accounting_period', 'generated_by'),
+            self.request.user,
+        )
 
 
 class MonthlyRecordDetailView(StaffRequiredMixin, DetailView):
@@ -392,12 +462,19 @@ class MonthlyRecordDetailView(StaffRequiredMixin, DetailView):
     context_object_name = 'monthly_record'
 
     def get_queryset(self):
-        return super().get_queryset().select_related('trust_account', 'accounting_period', 'generated_by')
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('trust_account', 'accounting_period', 'generated_by'),
+            self.request.user,
+        )
 
 
 class MonthlyRecordDownloadView(StaffRequiredMixin, View):
     def get(self, request, pk):
-        record = get_object_or_404(TrustMonthlyRecord, pk=pk)
+        queryset = scope_trust_queryset_for_user(
+            TrustMonthlyRecord.objects.select_related('trust_account', 'accounting_period'),
+            request.user,
+        )
+        record = get_object_or_404(queryset, pk=pk)
         if not record.pdf:
             raise Http404('Monthly record PDF not found.')
         filename = f'{record.record_type}_{record.accounting_period.period_end}.pdf'
@@ -411,11 +488,10 @@ class IrregularityListView(StaffRequiredMixin, ListView):
     ordering = ['-discovered_on']
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related('trust_account')
-        user = self.request.user
-        if user.role != 'admin' and user.firm:
-            qs = qs.filter(trust_account__firm=user.firm)
-        return qs
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('trust_account'),
+            self.request.user,
+        )
 
 
 class IrregularityCreateView(AdminOrAccountantMixin, CreateView):
@@ -440,7 +516,11 @@ class IrregularityDetailView(StaffRequiredMixin, View):
     template_name = 'trust/irregularity_detail.html'
 
     def get_irregularity(self, pk):
-        return get_object_or_404(Irregularity, pk=pk)
+        queryset = scope_trust_queryset_for_user(
+            Irregularity.objects.select_related('trust_account'),
+            self.request.user,
+        )
+        return get_object_or_404(queryset, pk=pk)
 
     def get(self, request, pk):
         irr = self.get_irregularity(pk)
@@ -466,7 +546,11 @@ class ReportsLandingView(StaffRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx['accounts'] = TrustAccount.objects.filter(is_active=True)
+        ctx['accounts'] = scope_trust_queryset_for_user(
+            TrustAccount.objects.filter(is_active=True),
+            self.request.user,
+            firm_lookup='firm',
+        )
         ctx['date_form'] = DateRangeForm()
         ctx['year_form'] = YearForm()
         return ctx
@@ -474,7 +558,10 @@ class ReportsLandingView(StaffRequiredMixin, TemplateView):
 
 class ReceiptsJournalPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
-        account = get_object_or_404(TrustAccount, pk=pk)
+        account = get_object_or_404(
+            scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
+            pk=pk,
+        )
         form = DateRangeForm(request.GET)
         if form.is_valid():
             date_from = form.cleaned_data.get('date_from') or datetime.date(datetime.date.today().year, 1, 1)
@@ -487,7 +574,10 @@ class ReceiptsJournalPDFView(StaffRequiredMixin, View):
 
 class PaymentsJournalPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
-        account = get_object_or_404(TrustAccount, pk=pk)
+        account = get_object_or_404(
+            scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
+            pk=pk,
+        )
         form = DateRangeForm(request.GET)
         if form.is_valid():
             date_from = form.cleaned_data.get('date_from') or datetime.date(datetime.date.today().year, 1, 1)
@@ -500,7 +590,10 @@ class PaymentsJournalPDFView(StaffRequiredMixin, View):
 
 class TrustTransferJournalPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
-        account = get_object_or_404(TrustAccount, pk=pk)
+        account = get_object_or_404(
+            scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
+            pk=pk,
+        )
         form = DateRangeForm(request.GET)
         if form.is_valid():
             date_from = form.cleaned_data.get('date_from') or datetime.date(datetime.date.today().year, 1, 1)
@@ -513,14 +606,20 @@ class TrustTransferJournalPDFView(StaffRequiredMixin, View):
 
 class TrialBalancePDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
-        account = get_object_or_404(TrustAccount, pk=pk)
+        account = get_object_or_404(
+            scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
+            pk=pk,
+        )
         as_at = datetime.date.today()
         return trust_reports.trust_trial_balance_pdf(account, as_at)
 
 
 class ExaminerPackZipView(AdminOrAccountantMixin, View):
     def get(self, request, pk):
-        account = get_object_or_404(TrustAccount, pk=pk)
+        account = get_object_or_404(
+            scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
+            pk=pk,
+        )
         form = YearForm(request.GET)
         if form.is_valid():
             year = form.cleaned_data['year']
@@ -531,17 +630,30 @@ class ExaminerPackZipView(AdminOrAccountantMixin, View):
 
 class LedgerStatementPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
-        ledger = get_object_or_404(MatterLedger, pk=pk)
+        ledger = get_object_or_404(
+            scope_trust_queryset_for_user(MatterLedger.objects.select_related('trust_account'), request.user),
+            pk=pk,
+        )
         return trust_reports.matter_ledger_statement_pdf(ledger)
 
 
 class ReconciliationPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
-        recon = get_object_or_404(MonthlyReconciliation, pk=pk)
+        recon = get_object_or_404(
+            scope_trust_queryset_for_user(MonthlyReconciliation.objects.select_related('trust_account'), request.user),
+            pk=pk,
+        )
         return trust_reports.monthly_reconciliation_pdf(recon)
 
 
 class ReceiptPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
-        receipt = get_object_or_404(Receipt, pk=pk)
+        receipt = get_object_or_404(
+            scope_trust_queryset_for_user(
+                Receipt.objects.select_related('transaction__matter_ledger__trust_account'),
+                request.user,
+                firm_lookup='transaction__matter_ledger__trust_account__firm',
+            ),
+            pk=pk,
+        )
         return trust_reports.receipt_pdf(receipt)
