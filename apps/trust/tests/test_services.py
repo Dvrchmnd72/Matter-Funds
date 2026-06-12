@@ -4,7 +4,9 @@ from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from unittest.mock import patch
 
 from apps.firms.models import Firm
 from apps.clients.models import Client
@@ -13,7 +15,8 @@ from apps.trust.models import (
     TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment, TrustJournal,
     MonthlyReconciliation, Irregularity,
 )
-from apps.trust.services import create_receipt, create_payment, create_trust_journal, reverse_transaction
+from apps.trust.services import create_receipt, create_payment, create_transfer_to_office, create_trust_journal, reverse_transaction
+from apps.trust import reports as trust_reports
 
 User = get_user_model()
 
@@ -124,6 +127,115 @@ class TrustServiceTestCase(TestCase):
                 authorised_by=self.admin_user, second_authoriser=self.admin_user,
                 created_by=self.admin_user
             )
+
+    def test_transfer_to_office_creates_transaction_and_payment_and_decrements_balance(self):
+        self.firm.is_sole_practitioner = True
+        self.firm.save()
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('1000.00'),
+            date_received=datetime.date.today(), payor_name='Client',
+            payment_method='eft', purpose='Retainer', created_by=self.admin_user
+        )
+        payment = create_transfer_to_office(
+            matter_ledger=self.ledger, amount=Decimal('300.00'),
+            date_paid=datetime.date.today(), payee_name='Office Account',
+            payment_method='eft', purpose='Costs transfer',
+            authorised_by=self.admin_user, created_by=self.admin_user,
+            costs_withdrawal_method='method_1_bill_issued',
+            costs_evidence_file=SimpleUploadedFile('bill.pdf', b'bill evidence'),
+            costs_withdrawal_notes='Bill issued and evidence retained.',
+        )
+        self.ledger.refresh_from_db()
+        self.assertEqual(self.ledger.balance, Decimal('700.00'))
+        self.assertEqual(payment.transaction.transaction_type, 'transfer_to_office')
+        self.assertEqual(payment.payment_number, 1)
+        self.assertEqual(payment.costs_withdrawal_method, 'method_1_bill_issued')
+        self.assertTrue(Payment.objects.filter(transaction__transaction_type='transfer_to_office').exists())
+
+    def test_transfer_to_office_rejects_insufficient_funds(self):
+        self.firm.is_sole_practitioner = True
+        self.firm.save()
+        with self.assertRaises(ValidationError):
+            create_transfer_to_office(
+                matter_ledger=self.ledger, amount=Decimal('300.00'),
+                date_paid=datetime.date.today(), payee_name='Office Account',
+                payment_method='eft', purpose='Costs transfer',
+                authorised_by=self.admin_user, created_by=self.admin_user,
+                costs_withdrawal_method='method_1_bill_issued',
+                costs_evidence_file=SimpleUploadedFile('bill.pdf', b'bill evidence'),
+            )
+
+    def test_transfer_to_office_requires_evidence(self):
+        self.firm.is_sole_practitioner = True
+        self.firm.save()
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('1000.00'),
+            date_received=datetime.date.today(), payor_name='Client',
+            payment_method='eft', purpose='Retainer', created_by=self.admin_user
+        )
+        with self.assertRaises(ValidationError):
+            create_transfer_to_office(
+                matter_ledger=self.ledger, amount=Decimal('300.00'),
+                date_paid=datetime.date.today(), payee_name='Office Account',
+                payment_method='eft', purpose='Costs transfer',
+                authorised_by=self.admin_user, created_by=self.admin_user,
+                costs_withdrawal_method='method_1_bill_issued',
+            )
+        with self.assertRaises(ValidationError):
+            create_transfer_to_office(
+                matter_ledger=self.ledger, amount=Decimal('300.00'),
+                date_paid=datetime.date.today(), payee_name='Office Account',
+                payment_method='eft', purpose='Costs transfer',
+                authorised_by=self.admin_user, created_by=self.admin_user,
+                costs_withdrawal_method='method_2_authority',
+                costs_evidence_file=SimpleUploadedFile('notes.pdf', b'notes'),
+            )
+
+    def test_transfer_to_office_eft_requires_second_authoriser_for_non_sole_practitioner(self):
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('1000.00'),
+            date_received=datetime.date.today(), payor_name='Client',
+            payment_method='eft', purpose='Retainer', created_by=self.admin_user
+        )
+        with self.assertRaises(ValidationError):
+            create_transfer_to_office(
+                matter_ledger=self.ledger, amount=Decimal('300.00'),
+                date_paid=datetime.date.today(), payee_name='Office Account',
+                payment_method='eft', purpose='Costs transfer',
+                authorised_by=self.admin_user, created_by=self.admin_user,
+                costs_withdrawal_method='method_1_bill_issued',
+                costs_evidence_file=SimpleUploadedFile('bill.pdf', b'bill evidence'),
+            )
+
+    def test_payments_journal_includes_transfer_to_office_rows(self):
+        self.firm.is_sole_practitioner = True
+        self.firm.save()
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('1000.00'),
+            date_received=datetime.date.today(), payor_name='Client',
+            payment_method='eft', purpose='Retainer', created_by=self.admin_user
+        )
+        create_transfer_to_office(
+            matter_ledger=self.ledger, amount=Decimal('300.00'),
+            date_paid=datetime.date.today(), payee_name='Office Account',
+            payment_method='eft', purpose='Costs transfer',
+            authorised_by=self.admin_user, created_by=self.admin_user,
+            costs_withdrawal_method='method_1_bill_issued',
+            costs_evidence_file=SimpleUploadedFile('bill.pdf', b'bill evidence'),
+        )
+        captured = {}
+
+        def fake_build(buffer, trust_account, title, subtitle, rows, col_headers):
+            captured['rows'] = rows
+            captured['headers'] = col_headers
+            buffer.write(b'pdf')
+
+        with patch.object(trust_reports, '_build_pdf_document', side_effect=fake_build):
+            trust_reports.payments_journal_pdf(
+                self.trust_account, datetime.date.today(), datetime.date.today()
+            )
+        self.assertIn('Type', captured['headers'])
+        self.assertTrue(any(row[1] == 'Transfer to Office' for row in captured['rows']))
 
     def test_trust_journal_double_entry(self):
         matter2 = Matter.objects.create(

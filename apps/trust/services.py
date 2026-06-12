@@ -110,6 +110,92 @@ def create_payment(*, matter_ledger, amount, date_paid, payee_name, payee_bsb=''
     return payment
 
 
+def _validate_costs_withdrawal_evidence(*, costs_withdrawal_method, costs_evidence_file=None,
+                                        notice_or_request_file=None, authority_or_agreement_file=None,
+                                        reimbursement_evidence_file=None):
+    if not costs_withdrawal_method:
+        raise ValidationError("Costs withdrawal method is required.")
+    valid_methods = {choice for choice, _ in Payment.COSTS_WITHDRAWAL_METHOD_CHOICES}
+    if costs_withdrawal_method not in valid_methods:
+        raise ValidationError("Invalid costs withdrawal method.")
+    if not any([costs_evidence_file, notice_or_request_file, authority_or_agreement_file, reimbursement_evidence_file]):
+        raise ValidationError("At least one costs withdrawal evidence document is required.")
+    if costs_withdrawal_method in ('method_2_authority', 'method_4_commercial_government') and not authority_or_agreement_file:
+        raise ValidationError("Authority or agreement evidence is required for this withdrawal method.")
+    if costs_withdrawal_method == 'method_3_reimbursement' and not reimbursement_evidence_file:
+        raise ValidationError("Reimbursement evidence is required for Method 3 withdrawals.")
+
+
+def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, payee_bsb='',
+                              payee_account='', payment_method, cheque_number='', purpose,
+                              authorised_by, second_authoriser=None, created_by,
+                              costs_withdrawal_method, key_evidence_date=None,
+                              costs_evidence_file=None, notice_or_request_file=None,
+                              authority_or_agreement_file=None, reimbursement_evidence_file=None,
+                              costs_withdrawal_notes=''):
+    _validate_costs_withdrawal_evidence(
+        costs_withdrawal_method=costs_withdrawal_method,
+        costs_evidence_file=costs_evidence_file,
+        notice_or_request_file=notice_or_request_file,
+        authority_or_agreement_file=authority_or_agreement_file,
+        reimbursement_evidence_file=reimbursement_evidence_file,
+    )
+    amount = _quantize(amount)
+    with transaction.atomic():
+        ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
+
+        if ledger.balance < amount:
+            raise ValidationError(f"Insufficient trust funds: balance is {ledger.balance}, transfer is {amount}.")
+
+        firm = ledger.trust_account.firm
+        if payment_method == 'eft' and not firm.is_sole_practitioner:
+            if not second_authoriser:
+                raise ValidationError("EFT payments require a second authoriser for non-sole-practitioner firms (R44).")
+            if second_authoriser.pk == authorised_by.pk:
+                raise ValidationError("Second authoriser must differ from the authorising person (R44).")
+
+        trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
+        payment_number = trust_account.next_payment_number
+        trust_account.next_payment_number += 1
+        trust_account.save(update_fields=['next_payment_number'])
+
+        txn = TrustTransaction(
+            transaction_type='transfer_to_office',
+            matter_ledger=ledger,
+            amount=amount,
+            date_received_or_paid=date_paid,
+            description=f"Transfer to office: {purpose}",
+            created_by=created_by,
+        )
+        txn.save()
+
+        payment = Payment(
+            transaction=txn,
+            payment_number=payment_number,
+            payee_name=payee_name,
+            payee_bsb=payee_bsb,
+            payee_account=payee_account,
+            payment_method=payment_method,
+            cheque_number=cheque_number,
+            purpose=purpose,
+            authorised_by=authorised_by,
+            second_authoriser=second_authoriser,
+            costs_withdrawal_method=costs_withdrawal_method,
+            key_evidence_date=key_evidence_date,
+            costs_evidence_file=costs_evidence_file,
+            notice_or_request_file=notice_or_request_file,
+            authority_or_agreement_file=authority_or_agreement_file,
+            reimbursement_evidence_file=reimbursement_evidence_file,
+            costs_withdrawal_notes=costs_withdrawal_notes,
+        )
+        payment.save()
+
+        ledger.balance = _quantize(ledger.balance - amount)
+        ledger.save(update_fields=['balance'])
+
+    return payment
+
+
 def create_trust_journal(*, from_ledger, to_ledger, amount, description,
                          written_authority_file, authority_date, authority_signed_by, created_by):
     amount = _quantize(amount)
