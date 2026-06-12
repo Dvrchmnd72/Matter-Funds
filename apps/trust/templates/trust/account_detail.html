@@ -24,6 +24,7 @@
       <td>
         <a href="{% url 'trust:receipt_create' ledger.pk %}" class="btn btn-success btn-sm">Receipt</a>
         <a href="{% url 'trust:payment_create' ledger.pk %}" class="btn btn-warning btn-sm">Payment</a>
+        <a href="{% url 'trust:transfer_costs_to_office_create' ledger.pk %}" class="btn btn-outline-warning btn-sm">Transfer Costs to Office</a>
         <a href="{% url 'trust:ledger_statement_pdf' ledger.pk %}" class="btn btn-outline-info btn-sm">Statement PDF</a>
       </td>
     </tr>

@@ -17,8 +17,8 @@ from .models import (
     MonthlyReconciliation, Irregularity,
 )
 from .forms import (
-    ReceiptForm, PaymentForm, TrustJournalForm, ReconciliationForm,
-    IrregularityResolveForm, DateRangeForm, YearForm,
+    ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm,
+    ManualIrregularityForm, IrregularityResolveForm, DateRangeForm, YearForm,
 )
 
 
@@ -123,6 +123,50 @@ class PaymentCreateView(StaffRequiredMixin, View):
                     created_by=request.user,
                 )
                 messages.success(request, f'Payment #{payment.payment_number} created successfully.')
+                return redirect(reverse('trust:account_detail', kwargs={'pk': ledger.trust_account_id}))
+            except (ValidationError, Exception) as e:
+                messages.error(request, str(e))
+        return render(request, self.template_name, {'form': form, 'ledger': ledger})
+
+
+class TransferCostsToOfficeCreateView(AdminOrAccountantMixin, View):
+    template_name = 'trust/transfer_costs_to_office_form.html'
+
+    def get_ledger(self):
+        return get_object_or_404(MatterLedger, pk=self.kwargs['ledger_pk'])
+
+    def get(self, request, ledger_pk):
+        form = TransferCostsToOfficeForm()
+        return render(request, self.template_name, {'form': form, 'ledger': self.get_ledger()})
+
+    def post(self, request, ledger_pk):
+        ledger = self.get_ledger()
+        form = TransferCostsToOfficeForm(request.POST, request.FILES)
+        if form.is_valid():
+            cd = form.cleaned_data
+            try:
+                payment = services.create_transfer_to_office(
+                    matter_ledger=ledger,
+                    amount=cd['amount'],
+                    date_paid=cd['date_paid'],
+                    payee_name=cd['payee_name'],
+                    payee_bsb=cd.get('payee_bsb', ''),
+                    payee_account=cd.get('payee_account', ''),
+                    payment_method=cd['payment_method'],
+                    cheque_number=cd.get('cheque_number', ''),
+                    purpose=cd['purpose'],
+                    authorised_by=request.user,
+                    second_authoriser=cd.get('second_authoriser'),
+                    created_by=request.user,
+                    costs_withdrawal_method=cd['costs_withdrawal_method'],
+                    key_evidence_date=cd.get('key_evidence_date'),
+                    costs_evidence_file=cd.get('costs_evidence_file'),
+                    notice_or_request_file=cd.get('notice_or_request_file'),
+                    authority_or_agreement_file=cd.get('authority_or_agreement_file'),
+                    reimbursement_evidence_file=cd.get('reimbursement_evidence_file'),
+                    costs_withdrawal_notes=cd.get('costs_withdrawal_notes', ''),
+                )
+                messages.success(request, f'Transfer to office #{payment.payment_number} created successfully.')
                 return redirect(reverse('trust:account_detail', kwargs={'pk': ledger.trust_account_id}))
             except (ValidationError, Exception) as e:
                 messages.error(request, str(e))
@@ -237,6 +281,24 @@ class IrregularityListView(StaffRequiredMixin, ListView):
         if user.role != 'admin' and user.firm:
             qs = qs.filter(trust_account__firm=user.firm)
         return qs
+
+
+class IrregularityCreateView(AdminOrAccountantMixin, CreateView):
+    model = Irregularity
+    form_class = ManualIrregularityForm
+    template_name = 'trust/irregularity_form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
+    def form_valid(self, form):
+        messages.success(self.request, 'Irregularity created successfully.')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('trust:irregularity_detail', kwargs={'pk': self.object.pk})
 
 
 class IrregularityDetailView(StaffRequiredMixin, View):

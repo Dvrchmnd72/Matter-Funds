@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block title %}New Irregularity – Matter Funds{% endblock %}
+{% block content %}
+<h1>New Irregularity</h1>
+<div class="row"><div class="col-md-8">
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form|crispy }}<button type="submit" class="btn btn-primary">Create Irregularity</button></form>
+</div></div>
+<a href="{% url 'trust:irregularity_list' %}" class="btn btn-secondary mt-3">Back to Irregularities</a>
+{% endblock %}

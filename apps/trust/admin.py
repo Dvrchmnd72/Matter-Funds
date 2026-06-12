@@ -83,9 +83,12 @@ class ReceiptAdmin(_ReadOnlyAppendMixin, admin.ModelAdmin):
 
 @admin.register(Payment)
 class PaymentAdmin(_ReadOnlyAppendMixin, admin.ModelAdmin):
-    list_display = ['payment_number', 'payee_name', 'payment_method', 'purpose', 'authorised_by']
-    search_fields = ['payee_name', 'purpose']
+    list_display = ['payment_number', 'transaction_type', 'payee_name', 'payment_method', 'purpose', 'authorised_by', 'costs_withdrawal_method']
+    search_fields = ['payee_name', 'purpose', 'costs_withdrawal_notes']
     readonly_fields = ['payment_number', 'transaction']
+
+    def transaction_type(self, obj):
+        return obj.transaction.get_transaction_type_display()
 
     def save_model(self, request, obj, form, change):
         create_payment(

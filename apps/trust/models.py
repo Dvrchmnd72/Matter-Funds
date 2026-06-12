@@ -143,6 +143,12 @@ class Payment(models.Model):
         ('cheque', 'Cheque'),
         ('eft', 'EFT'),
     ]
+    COSTS_WITHDRAWAL_METHOD_CHOICES = [
+        ('method_1_bill_issued', 'Method 1 - Bill issued'),
+        ('method_2_authority', 'Method 2 - Authority'),
+        ('method_3_reimbursement', 'Method 3 - Reimbursement'),
+        ('method_4_commercial_government', 'Method 4 - Commercial/Government client'),
+    ]
 
     transaction = models.OneToOneField(TrustTransaction, on_delete=models.PROTECT, related_name='payment')
     payment_number = models.PositiveIntegerField()
@@ -154,6 +160,13 @@ class Payment(models.Model):
     purpose = models.CharField(max_length=500)
     authorised_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='trust_payments_authorised')
     second_authoriser = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='trust_payments_second_authorised')
+    costs_withdrawal_method = models.CharField(max_length=40, choices=COSTS_WITHDRAWAL_METHOD_CHOICES, blank=True, default='')
+    key_evidence_date = models.DateField(null=True, blank=True)
+    costs_evidence_file = models.FileField(upload_to='trust/costs/evidence/', null=True, blank=True)
+    notice_or_request_file = models.FileField(upload_to='trust/costs/notices/', null=True, blank=True)
+    authority_or_agreement_file = models.FileField(upload_to='trust/costs/authorities/', null=True, blank=True)
+    reimbursement_evidence_file = models.FileField(upload_to='trust/costs/reimbursements/', null=True, blank=True)
+    costs_withdrawal_notes = models.TextField(blank=True, default='')
 
     class Meta:
         verbose_name = 'Payment'

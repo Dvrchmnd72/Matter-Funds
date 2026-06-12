@@ -3,7 +3,7 @@ from decimal import Decimal
 from django import forms
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
-from .models import MatterLedger, MonthlyReconciliation, Irregularity
+from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount
 
 
 class ReceiptForm(forms.Form):
@@ -47,6 +47,83 @@ class PaymentForm(forms.Form):
         self.helper = FormHelper()
         self.helper.form_tag = False
         self.helper.add_input(Submit('submit', 'Create Payment'))
+
+
+class TransferCostsToOfficeForm(forms.Form):
+    amount = forms.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
+    date_paid = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}), initial=datetime.date.today)
+    payee_name = forms.CharField(max_length=255, label='Office account name')
+    payee_bsb = forms.CharField(max_length=7, required=False, label='Office account BSB')
+    payee_account = forms.CharField(max_length=20, required=False, label='Office account number')
+    payment_method = forms.ChoiceField(choices=[('cheque', 'Cheque'), ('eft', 'EFT')])
+    cheque_number = forms.CharField(max_length=50, required=False)
+    purpose = forms.CharField(max_length=500, initial='Transfer legal costs to office account')
+    second_authoriser = forms.ModelChoiceField(
+        queryset=None, required=False, help_text='Required for EFT on non-sole-practitioner firms.'
+    )
+    costs_withdrawal_method = forms.ChoiceField(choices=Payment.COSTS_WITHDRAWAL_METHOD_CHOICES)
+    key_evidence_date = forms.DateField(
+        widget=forms.DateInput(attrs={'type': 'date'}),
+        required=False,
+        help_text='Optional key date for examiner reference, such as bill, authority, or reimbursement date.',
+    )
+    costs_evidence_file = forms.FileField(required=False, help_text='Primary evidence, such as bill, authority, agreement, or evidence bundle.')
+    notice_or_request_file = forms.FileField(required=False)
+    authority_or_agreement_file = forms.FileField(required=False)
+    reimbursement_evidence_file = forms.FileField(required=False)
+    costs_withdrawal_notes = forms.CharField(widget=forms.Textarea, required=False)
+
+    def __init__(self, *args, **kwargs):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        super().__init__(*args, **kwargs)
+        self.fields['second_authoriser'].queryset = User.objects.filter(
+            role__in=['admin', 'solicitor', 'accountant']
+        )
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.add_input(Submit('submit', 'Transfer Costs to Office'))
+
+    def clean(self):
+        cleaned_data = super().clean()
+        method = cleaned_data.get('costs_withdrawal_method')
+        evidence_fields = [
+            'costs_evidence_file',
+            'notice_or_request_file',
+            'authority_or_agreement_file',
+            'reimbursement_evidence_file',
+        ]
+        if not any(cleaned_data.get(field) for field in evidence_fields):
+            raise forms.ValidationError('At least one costs withdrawal evidence document is required.')
+        if method in ('method_2_authority', 'method_4_commercial_government') and not cleaned_data.get('authority_or_agreement_file'):
+            self.add_error('authority_or_agreement_file', 'Authority or agreement evidence is required for this withdrawal method.')
+        if method == 'method_3_reimbursement' and not cleaned_data.get('reimbursement_evidence_file'):
+            self.add_error('reimbursement_evidence_file', 'Reimbursement evidence is required for Method 3 withdrawals.')
+        return cleaned_data
+
+
+class ManualIrregularityForm(forms.ModelForm):
+    class Meta:
+        model = Irregularity
+        fields = [
+            'trust_account', 'discovered_on', 'description', 'amount',
+            'reported_to_law_society_on', 'report_document', 'resolution',
+        ]
+        widgets = {
+            'discovered_on': forms.DateInput(attrs={'type': 'date'}),
+            'reported_to_law_society_on': forms.DateInput(attrs={'type': 'date'}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        if user and user.role != 'admin' and user.firm:
+            self.fields['trust_account'].queryset = TrustAccount.objects.filter(firm=user.firm)
+        else:
+            self.fields['trust_account'].queryset = TrustAccount.objects.all()
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.add_input(Submit('submit', 'Create Irregularity'))
 
 
 class TrustJournalForm(forms.Form):
