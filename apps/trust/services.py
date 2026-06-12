@@ -1,16 +1,175 @@
 import datetime
+import calendar
+import hashlib
 from decimal import Decimal, ROUND_HALF_EVEN
 
+from django.core.files.base import ContentFile
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.utils import timezone
 
 from .models import (
     MatterLedger, TrustAccount, TrustTransaction, Receipt, Payment, TrustJournal,
+    TrustAccountingPeriod, MonthlyReconciliation, TrustMonthlyRecord,
 )
 
 
 def _quantize(amount):
     return Decimal(amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN)
+
+
+def get_month_bounds(date_value):
+    return (
+        datetime.date(date_value.year, date_value.month, 1),
+        datetime.date(date_value.year, date_value.month, calendar.monthrange(date_value.year, date_value.month)[1]),
+    )
+
+
+def get_or_create_accounting_period(trust_account, date_value):
+    period_start, period_end = get_month_bounds(date_value)
+    period, _ = TrustAccountingPeriod.objects.get_or_create(
+        trust_account=trust_account,
+        period_start=period_start,
+        period_end=period_end,
+        defaults={'status': TrustAccountingPeriod.STATUS_OPEN},
+    )
+    return period
+
+
+def get_accounting_period_for_date(trust_account, date_value):
+    return TrustAccountingPeriod.objects.filter(
+        trust_account=trust_account,
+        period_start__lte=date_value,
+        period_end__gte=date_value,
+    ).first()
+
+
+def ensure_period_is_open(trust_account, date_value):
+    period = get_or_create_accounting_period(trust_account, date_value)
+    if period.status == TrustAccountingPeriod.STATUS_LOCKED:
+        raise ValidationError('The accounting period for this transaction date is locked.')
+    return period
+
+
+def required_monthly_record_types():
+    return [
+        TrustMonthlyRecord.RECORD_RECEIPTS_CASH_BOOK,
+        TrustMonthlyRecord.RECORD_PAYMENTS_CASH_BOOK,
+        TrustMonthlyRecord.RECORD_TRUST_TRANSFER_JOURNAL,
+        TrustMonthlyRecord.RECORD_TRIAL_BALANCE,
+        TrustMonthlyRecord.RECORD_RECONCILIATION_STATEMENT,
+    ]
+
+
+def calculate_pdf_sha256(pdf_bytes):
+    return hashlib.sha256(pdf_bytes).hexdigest()
+
+
+def has_all_required_monthly_records(period):
+    existing = set(period.monthly_records.values_list('record_type', flat=True))
+    return set(required_monthly_record_types()).issubset(existing)
+
+
+def _monthly_record_filename(reconciliation, record_type):
+    return f"{record_type}_{reconciliation.period_end}.pdf"
+
+
+def generate_monthly_record(reconciliation, record_type, user):
+    from . import reports as trust_reports
+
+    if not reconciliation.accounting_period_id:
+        raise ValidationError('Reconciliation must be linked to an accounting period before records can be generated.')
+    period = reconciliation.accounting_period
+    trust_account = reconciliation.trust_account
+    if TrustMonthlyRecord.objects.filter(accounting_period=period, record_type=record_type).exists():
+        raise ValidationError(f'{dict(TrustMonthlyRecord.RECORD_TYPE_CHOICES).get(record_type, record_type)} already exists for this period.')
+
+    if record_type == TrustMonthlyRecord.RECORD_RECEIPTS_CASH_BOOK:
+        pdf_bytes = trust_reports.receipts_cash_book_pdf_bytes(trust_account, period.period_start, period.period_end)
+    elif record_type == TrustMonthlyRecord.RECORD_PAYMENTS_CASH_BOOK:
+        pdf_bytes = trust_reports.payments_cash_book_pdf_bytes(trust_account, period.period_start, period.period_end)
+    elif record_type == TrustMonthlyRecord.RECORD_TRUST_TRANSFER_JOURNAL:
+        pdf_bytes = trust_reports.trust_transfer_journal_pdf_bytes(trust_account, period.period_start, period.period_end)
+    elif record_type == TrustMonthlyRecord.RECORD_TRIAL_BALANCE:
+        pdf_bytes = trust_reports.trial_balance_pdf_bytes(trust_account, period.period_end)
+    elif record_type == TrustMonthlyRecord.RECORD_RECONCILIATION_STATEMENT:
+        pdf_bytes = trust_reports.reconciliation_statement_pdf_bytes(reconciliation)
+    else:
+        raise ValidationError('Unknown monthly record type.')
+
+    monthly_record = TrustMonthlyRecord(
+        accounting_period=period,
+        reconciliation=reconciliation,
+        trust_account=trust_account,
+        record_type=record_type,
+        generated_by=user,
+        sha256_hash=calculate_pdf_sha256(pdf_bytes),
+    )
+    monthly_record.pdf.save(_monthly_record_filename(reconciliation, record_type), ContentFile(pdf_bytes), save=False)
+    monthly_record.full_clean()
+    monthly_record.save()
+    return monthly_record
+
+
+def generate_monthly_records_for_reconciliation(reconciliation, user):
+    records = []
+    for record_type in required_monthly_record_types():
+        records.append(generate_monthly_record(reconciliation, record_type, user))
+    return records
+
+
+def can_finalise_reconciliation(reconciliation):
+    reasons = []
+    if reconciliation.is_finalised:
+        reasons.append('Reconciliation is already finalised.')
+    if not reconciliation.is_reconciled:
+        reasons.append('Reconciliation is not balanced.')
+    if not reconciliation.bank_statement_pdf:
+        reasons.append('Bank statement PDF is required.')
+    if not reconciliation.accounting_period_id:
+        reasons.append('Reconciliation is not linked to an accounting period.')
+    elif reconciliation.accounting_period.status == TrustAccountingPeriod.STATUS_LOCKED:
+        reasons.append('Accounting period is locked.')
+    return not reasons, reasons
+
+
+def finalise_reconciliation(reconciliation, user):
+    with transaction.atomic():
+        recon = MonthlyReconciliation.objects.select_for_update().select_related('accounting_period').get(pk=reconciliation.pk)
+        can_finalise, reasons = can_finalise_reconciliation(recon)
+        if not can_finalise:
+            raise ValidationError(' '.join(reasons))
+        period = TrustAccountingPeriod.objects.select_for_update().get(pk=recon.accounting_period_id)
+        if period.status == TrustAccountingPeriod.STATUS_LOCKED:
+            raise ValidationError('Accounting period is locked.')
+        now = timezone.now()
+        recon.is_finalised = True
+        recon.finalised_by = user
+        recon.finalised_on = now
+        recon.signed_by = recon.signed_by or user
+        recon.signed_on = recon.signed_on or now
+        recon.full_clean()
+        recon.save()
+        generate_monthly_records_for_reconciliation(recon, user)
+    return recon
+
+
+def lock_accounting_period(period, user):
+    with transaction.atomic():
+        locked_period = TrustAccountingPeriod.objects.select_for_update().get(pk=period.pk)
+        if locked_period.status == TrustAccountingPeriod.STATUS_LOCKED:
+            raise ValidationError('Accounting period is already locked.')
+        reconciliation = getattr(locked_period, 'reconciliation', None)
+        if not reconciliation or not reconciliation.is_finalised:
+            raise ValidationError('Accounting period requires a finalised reconciliation before locking.')
+        if not has_all_required_monthly_records(locked_period):
+            raise ValidationError('All required monthly records must be generated before locking.')
+        locked_period.status = TrustAccountingPeriod.STATUS_LOCKED
+        locked_period.locked_by = user
+        locked_period.locked_on = timezone.now()
+        locked_period.full_clean()
+        locked_period.save(update_fields=['status', 'locked_by', 'locked_on', 'updated_at'])
+        return locked_period
 
 
 def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
@@ -19,6 +178,7 @@ def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
         trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
+        ensure_period_is_open(trust_account, date_received)
 
         receipt_number = trust_account.next_receipt_number
         trust_account.next_receipt_number += 1
@@ -64,6 +224,7 @@ def create_payment(*, matter_ledger, amount, date_paid, payee_name, payee_bsb=''
     amount = _quantize(amount)
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
+        ensure_period_is_open(ledger.trust_account, date_paid)
 
         if ledger.balance < amount:
             raise ValidationError(f"Insufficient trust funds: balance is {ledger.balance}, payment is {amount}.")
@@ -143,6 +304,7 @@ def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, p
     amount = _quantize(amount)
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
+        ensure_period_is_open(ledger.trust_account, date_paid)
 
         if ledger.balance < amount:
             raise ValidationError(f"Insufficient trust funds: balance is {ledger.balance}, transfer is {amount}.")
@@ -212,6 +374,7 @@ def create_trust_journal(*, from_ledger, to_ledger, amount, description,
             raise ValidationError(f"Insufficient funds in source ledger: balance {from_l.balance}, journal amount {amount}.")
 
         today = datetime.date.today()
+        ensure_period_is_open(from_l.trust_account, today)
 
         txn_out = TrustTransaction(
             transaction_type='journal_out',
@@ -262,6 +425,7 @@ def reverse_transaction(*, transaction_obj, reason, created_by):
             raise ValidationError("This transaction has already been reversed.")
 
         ledger = MatterLedger.objects.select_for_update().get(pk=transaction_obj.matter_ledger_id)
+        ensure_period_is_open(ledger.trust_account, datetime.date.today())
 
         txn_type = transaction_obj.transaction_type
         if txn_type in ('receipt', 'journal_in'):

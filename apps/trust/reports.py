@@ -22,7 +22,7 @@ try:
 except ImportError:
     HAS_OPENPYXL = False
 
-from .models import TrustTransaction, MatterLedger, MonthlyReconciliation, Irregularity
+from .models import TrustTransaction, MatterLedger, MonthlyReconciliation, Irregularity, TrustJournal
 
 
 FOOTER_TEXT = "Prepared from Matter Funds \u2014 refer to LPUGR Part 4.2"
@@ -41,6 +41,12 @@ def _build_header_info(trust_account):
 def _make_pdf_response(filename):
     response = HttpResponse(content_type='application/pdf')
     response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
+
+
+def _pdf_response_from_bytes(filename, pdf_bytes):
+    response = _make_pdf_response(filename)
+    response.write(pdf_bytes)
     return response
 
 
@@ -75,6 +81,13 @@ def _build_pdf_document(buffer, trust_account, title, period_str, rows, col_head
 
 
 def receipts_journal_pdf(trust_account, date_from, date_to):
+    return _pdf_response_from_bytes(
+        f'receipts_journal_{date_from}_{date_to}.pdf',
+        receipts_cash_book_pdf_bytes(trust_account, date_from, date_to),
+    )
+
+
+def receipts_cash_book_pdf_bytes(trust_account, date_from, date_to):
     transactions = (
         TrustTransaction.objects
         .filter(
@@ -100,14 +113,19 @@ def receipts_journal_pdf(trust_account, date_from, date_to):
             str(txn.amount),
         ])
 
-    _build_pdf_document(buffer, trust_account, 'Trust Receipts Journal',
+    _build_pdf_document(buffer, trust_account, 'Trust Receipts Cash Book',
                         f"{date_from} to {date_to}", rows, col_headers)
-    response = _make_pdf_response(f'receipts_journal_{date_from}_{date_to}.pdf')
-    response.write(buffer.getvalue())
-    return response
+    return buffer.getvalue()
 
 
 def payments_journal_pdf(trust_account, date_from, date_to):
+    return _pdf_response_from_bytes(
+        f'payments_journal_{date_from}_{date_to}.pdf',
+        payments_cash_book_pdf_bytes(trust_account, date_from, date_to),
+    )
+
+
+def payments_cash_book_pdf_bytes(trust_account, date_from, date_to):
     transactions = (
         TrustTransaction.objects
         .filter(
@@ -134,11 +152,43 @@ def payments_journal_pdf(trust_account, date_from, date_to):
             str(txn.amount),
         ])
 
-    _build_pdf_document(buffer, trust_account, 'Trust Payments Journal',
+    _build_pdf_document(buffer, trust_account, 'Trust Payments Cash Book',
                         f"{date_from} to {date_to}", rows, col_headers)
-    response = _make_pdf_response(f'payments_journal_{date_from}_{date_to}.pdf')
-    response.write(buffer.getvalue())
-    return response
+    return buffer.getvalue()
+
+
+def trust_transfer_journal_pdf_bytes(trust_account, date_from, date_to):
+    journals = (
+        TrustJournal.objects
+        .filter(
+            from_ledger__trust_account=trust_account,
+            journal_out_txn__date_received_or_paid__range=(date_from, date_to),
+        )
+        .select_related('from_ledger__matter', 'to_ledger__matter', 'journal_out_txn')
+        .order_by('journal_out_txn__date_received_or_paid', 'pk')
+    )
+    buffer = io.BytesIO()
+    col_headers = ['Date', 'From Matter', 'To Matter', 'Amount ($)', 'Description', 'Authority Date', 'Authority Signed By']
+    rows = []
+    for journal in journals:
+        rows.append([
+            str(journal.journal_out_txn.date_received_or_paid) if journal.journal_out_txn else '',
+            str(journal.from_ledger.matter),
+            str(journal.to_ledger.matter),
+            str(journal.amount),
+            journal.description,
+            str(journal.authority_date),
+            journal.authority_signed_by,
+        ])
+    _build_pdf_document(buffer, trust_account, 'Trust Transfer Journal', f"{date_from} to {date_to}", rows, col_headers)
+    return buffer.getvalue()
+
+
+def trust_transfer_journal_pdf(trust_account, date_from, date_to):
+    return _pdf_response_from_bytes(
+        f'trust_transfer_journal_{date_from}_{date_to}.pdf',
+        trust_transfer_journal_pdf_bytes(trust_account, date_from, date_to),
+    )
 
 
 def matter_ledger_statement_pdf(matter_ledger):
@@ -177,30 +227,67 @@ def matter_ledger_statement_pdf(matter_ledger):
 
 
 def trust_trial_balance_pdf(trust_account, as_at):
+    return _pdf_response_from_bytes(
+        f'trial_balance_{as_at}.pdf',
+        trial_balance_pdf_bytes(trust_account, as_at),
+    )
+
+
+def _transaction_delta(txn):
+    if txn.transaction_type in ('receipt', 'journal_in'):
+        return txn.amount
+    if txn.transaction_type in ('payment', 'journal_out', 'transfer_to_office'):
+        return -txn.amount
+    if txn.transaction_type == 'reversal' and txn.reverses:
+        return -_transaction_delta(txn.reverses)
+    return Decimal('0.00')
+
+
+def calculate_ledger_balances_as_at(trust_account, as_at):
+    balances = {ledger.pk: Decimal('0.00') for ledger in MatterLedger.objects.filter(trust_account=trust_account)}
+    transactions = (
+        TrustTransaction.objects
+        .filter(matter_ledger__trust_account=trust_account, date_received_or_paid__lte=as_at)
+        .select_related('matter_ledger', 'reverses')
+        .order_by('date_received_or_paid', 'created_at', 'pk')
+    )
+    for txn in transactions:
+        balances[txn.matter_ledger_id] = balances.get(txn.matter_ledger_id, Decimal('0.00')) + _transaction_delta(txn)
+    return balances
+
+
+def trial_balance_pdf_bytes(trust_account, as_at):
     ledgers = (
         MatterLedger.objects
         .filter(trust_account=trust_account)
         .select_related('matter')
         .order_by('matter__file_number')
     )
+    balances = calculate_ledger_balances_as_at(trust_account, as_at)
 
     buffer = io.BytesIO()
     col_headers = ['Matter', 'Balance ($)']
     rows = []
     total = Decimal('0.00')
     for ledger in ledgers:
-        rows.append([str(ledger.matter), str(ledger.balance)])
-        total += ledger.balance
+        balance = balances.get(ledger.pk, Decimal('0.00'))
+        rows.append([str(ledger.matter), str(balance)])
+        total += balance
     rows.append(['TOTAL', str(total)])
 
     _build_pdf_document(buffer, trust_account, 'Trust Trial Balance',
                         f"As at {as_at}", rows, col_headers)
-    response = _make_pdf_response(f'trial_balance_{as_at}.pdf')
-    response.write(buffer.getvalue())
-    return response
+    return buffer.getvalue()
 
 
 def monthly_reconciliation_pdf(reconciliation):
+    return _pdf_response_from_bytes(
+        f'reconciliation_{reconciliation.period_end}.pdf',
+        reconciliation_statement_pdf_bytes(reconciliation),
+    )
+
+
+def reconciliation_statement_pdf_bytes(reconciliation):
     trust_account = reconciliation.trust_account
     buffer = io.BytesIO()
     col_headers = ['Item', 'Amount ($)']
@@ -211,13 +298,15 @@ def monthly_reconciliation_pdf(reconciliation):
         ['Less: Unpresented Cheques', str(reconciliation.unpresented_cheques_total)],
         ['Add: Outstanding Deposits', str(reconciliation.outstanding_deposits_total)],
         ['Reconciled Balance', str(reconciliation.reconciled_balance)],
-        ['Reconciled?', 'Yes' if reconciliation.is_reconciled else 'NO \u2013 DISCREPANCY'],
+        ['Reconciled?', 'Yes' if reconciliation.is_reconciled else 'NO - DISCREPANCY'],
+        ['Finalised?', 'Yes' if getattr(reconciliation, 'is_finalised', False) else 'No'],
+        ['Finalised By', str(reconciliation.finalised_by) if getattr(reconciliation, 'finalised_by_id', None) else ''],
+        ['Finalised On', str(reconciliation.finalised_on) if getattr(reconciliation, 'finalised_on', None) else ''],
+        ['Period Status', reconciliation.accounting_period.get_status_display() if getattr(reconciliation, 'accounting_period_id', None) else ''],
     ]
     _build_pdf_document(buffer, trust_account, 'Monthly Trust Reconciliation',
                         str(reconciliation.period_end), rows, col_headers)
-    response = _make_pdf_response(f'reconciliation_{reconciliation.period_end}.pdf')
-    response.write(buffer.getvalue())
-    return response
+    return buffer.getvalue()
 
 
 def external_examiner_pack_zip(trust_account, year):

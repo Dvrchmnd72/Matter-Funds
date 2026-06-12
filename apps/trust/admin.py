@@ -3,7 +3,8 @@ from django.contrib import admin
 from .models import (
     TrustAccount, ControlledMoneyAccount, MatterLedger, TrustTransaction,
     Receipt, Payment, TrustJournal, WrittenDirection, TransitMoneyEntry,
-    PowerMoneyEntry, MonthlyReconciliation, Irregularity,
+    PowerMoneyEntry, MonthlyReconciliation, Irregularity, TrustAccountingPeriod,
+    TrustMonthlyRecord,
 )
 from .services import create_receipt, create_payment
 
@@ -135,9 +136,43 @@ class PowerMoneyEntryAdmin(admin.ModelAdmin):
 
 @admin.register(MonthlyReconciliation)
 class MonthlyReconciliationAdmin(_ReadOnlyAppendMixin, admin.ModelAdmin):
-    list_display = ['trust_account', 'period_end', 'cash_book_balance', 'reconciled_balance', 'is_reconciled']
-    list_filter = ['trust_account', 'is_reconciled']
-    readonly_fields = ['reconciled_balance', 'is_reconciled', 'created_at']
+    list_display = ['trust_account', 'period_end', 'cash_book_balance', 'reconciled_balance', 'is_reconciled', 'is_finalised']
+    list_filter = ['trust_account', 'is_reconciled', 'is_finalised']
+    readonly_fields = ['reconciled_balance', 'is_reconciled', 'is_finalised', 'finalised_by', 'finalised_on', 'created_at']
+
+
+@admin.register(TrustAccountingPeriod)
+class TrustAccountingPeriodAdmin(admin.ModelAdmin):
+    list_display = ['trust_account', 'period_start', 'period_end', 'status', 'locked_by', 'locked_on']
+    list_filter = ['trust_account', 'status']
+    readonly_fields = ['created_at', 'updated_at', 'locked_by', 'locked_on']
+
+    def has_change_permission(self, request, obj=None):
+        if obj and obj.status == TrustAccountingPeriod.STATUS_LOCKED:
+            return False
+        return super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj and obj.status == TrustAccountingPeriod.STATUS_LOCKED:
+            return False
+        return super().has_delete_permission(request, obj)
+
+
+@admin.register(TrustMonthlyRecord)
+class TrustMonthlyRecordAdmin(admin.ModelAdmin):
+    list_display = ['accounting_period', 'record_type', 'generated_by', 'generated_at', 'sha256_hash']
+    list_filter = ['trust_account', 'record_type']
+    search_fields = ['sha256_hash']
+    readonly_fields = ['accounting_period', 'reconciliation', 'trust_account', 'record_type', 'pdf', 'generated_by', 'generated_at', 'sha256_hash']
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Irregularity)

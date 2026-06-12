@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block title %}Finalise Reconciliation – Matter Funds{% endblock %}
+{% block content %}
+<h1>Finalise Reconciliation – {{ reconciliation.period_end }}</h1>
+{% if finalise_blockers %}
+<div class="alert alert-warning">
+  <strong>This reconciliation cannot be finalised yet:</strong>
+  <ul>{% for blocker in finalise_blockers %}<li>{{ blocker }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+<dl class="row">
+  <dt class="col-sm-4">Trust Account</dt><dd class="col-sm-8">{{ reconciliation.trust_account }}</dd>
+  <dt class="col-sm-4">Balanced</dt><dd class="col-sm-8">{{ reconciliation.is_reconciled|yesno:"Yes,No" }}</dd>
+  <dt class="col-sm-4">Cash Book Balance</dt><dd class="col-sm-8">${{ reconciliation.cash_book_balance }}</dd>
+  <dt class="col-sm-4">Ledger Total Balance</dt><dd class="col-sm-8">${{ reconciliation.ledger_total_balance }}</dd>
+  <dt class="col-sm-4">Reconciled Balance</dt><dd class="col-sm-8">${{ reconciliation.reconciled_balance }}</dd>
+</dl>
+<form method="post">{% csrf_token %}{{ form|crispy }}<button type="submit" class="btn btn-primary" {% if finalise_blockers %}disabled{% endif %}>Finalise Reconciliation</button></form>
+<a href="{% url 'trust:reconciliation_detail' reconciliation.pk %}" class="btn btn-secondary mt-2">Back</a>
+{% endblock %}

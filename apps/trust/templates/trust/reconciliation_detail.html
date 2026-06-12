@@ -16,7 +16,24 @@
       {{ reconciliation.is_reconciled|yesno:"Reconciled,Not Reconciled" }}
     </span>
   </dd>
+  <dt class="col-sm-4">Finalised</dt><dd class="col-sm-8">{{ reconciliation.is_finalised|yesno:"Yes,No" }}</dd>
+  <dt class="col-sm-4">Finalised By</dt><dd class="col-sm-8">{{ reconciliation.finalised_by|default:"" }}</dd>
+  <dt class="col-sm-4">Finalised On</dt><dd class="col-sm-8">{{ reconciliation.finalised_on|default:"" }}</dd>
+  <dt class="col-sm-4">Period Status</dt><dd class="col-sm-8">{% if accounting_period %}{{ accounting_period.get_status_display }}{% endif %}</dd>
 </dl>
+<h2>Monthly Records</h2>
+<ul>
+  {% for record in monthly_records %}
+    <li><a href="{% url 'trust:monthly_record_detail' record.pk %}">{{ record.get_record_type_display }}</a> – <code>{{ record.sha256_hash }}</code></li>
+  {% empty %}
+    <li>No monthly records generated.</li>
+  {% endfor %}
+</ul>
+{% if finalise_blockers and not reconciliation.is_finalised %}
+<div class="alert alert-warning"><strong>Finalisation blockers:</strong><ul>{% for blocker in finalise_blockers %}<li>{{ blocker }}</li>{% endfor %}</ul></div>
+{% endif %}
+{% if can_finalise %}<a href="{% url 'trust:reconciliation_finalise' reconciliation.pk %}" class="btn btn-success">Finalise Reconciliation</a>{% endif %}
+{% if can_lock_period %}<a href="{% url 'trust:period_lock' accounting_period.pk %}" class="btn btn-danger">Lock Period</a>{% endif %}
 <a href="{% url 'trust:reconciliation_pdf' reconciliation.pk %}" class="btn btn-primary">Download PDF</a>
 <a href="{% url 'trust:reconciliation_list' %}" class="btn btn-secondary">Back</a>
 {% endblock %}
