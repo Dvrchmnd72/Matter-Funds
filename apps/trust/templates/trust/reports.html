@@ -18,6 +18,11 @@
       <div class="col-auto"><input type="date" name="date_to" class="form-control form-control-sm" placeholder="To"></div>
       <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Payments Journal PDF</button></div>
     </form>
+    <form method="get" action="{% url 'trust:trust_transfer_journal_pdf' account.pk %}" class="row g-2 mb-2">
+      <div class="col-auto"><input type="date" name="date_from" class="form-control form-control-sm" placeholder="From"></div>
+      <div class="col-auto"><input type="date" name="date_to" class="form-control form-control-sm" placeholder="To"></div>
+      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Trust Transfer Journal PDF</button></div>
+    </form>
     <div class="d-flex gap-2">
       <a href="{% url 'trust:trial_balance_pdf' account.pk %}" class="btn btn-sm btn-outline-secondary">Trial Balance PDF</a>
     </div>

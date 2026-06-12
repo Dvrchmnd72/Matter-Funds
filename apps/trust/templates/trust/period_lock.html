@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block title %}Lock Accounting Period – Matter Funds{% endblock %}
+{% block content %}
+<h1>Lock Accounting Period – {{ period.period_end }}</h1>
+<div class="alert alert-warning">Locked periods cannot accept new trust transactions dated within {{ period.period_start }} to {{ period.period_end }}.</div>
+<form method="post">{% csrf_token %}{{ form|crispy }}<button type="submit" class="btn btn-danger">Lock Period</button></form>
+<a href="{% url 'trust:period_detail' period.pk %}" class="btn btn-secondary mt-2">Back</a>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Accounting Period {{ period.period_end }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>Accounting Period – {{ period.period_end }}</h1>
+<dl class="row">
+  <dt class="col-sm-4">Trust Account</dt><dd class="col-sm-8">{{ period.trust_account }}</dd>
+  <dt class="col-sm-4">Period</dt><dd class="col-sm-8">{{ period.period_start }} to {{ period.period_end }}</dd>
+  <dt class="col-sm-4">Status</dt><dd class="col-sm-8">{{ period.get_status_display }}</dd>
+  <dt class="col-sm-4">Locked By</dt><dd class="col-sm-8">{{ period.locked_by|default:"" }}</dd>
+  <dt class="col-sm-4">Locked On</dt><dd class="col-sm-8">{{ period.locked_on|default:"" }}</dd>
+</dl>
+{% if period.reconciliation %}<p><a href="{% url 'trust:reconciliation_detail' period.reconciliation.pk %}" class="btn btn-outline-primary">View Reconciliation</a></p>{% endif %}
+<h2>Monthly Records</h2>
+<ul>{% for record in period.monthly_records.all %}<li><a href="{% url 'trust:monthly_record_detail' record.pk %}">{{ record.get_record_type_display }}</a> – {{ record.generated_at }}</li>{% empty %}<li>No monthly records generated.</li>{% endfor %}</ul>
+{% if period.status == 'open' and period.reconciliation and period.reconciliation.is_finalised %}<a href="{% url 'trust:period_lock' period.pk %}" class="btn btn-danger">Lock Period</a>{% endif %}
+<a href="{% url 'trust:period_list' %}" class="btn btn-secondary">Back</a>
+{% endblock %}
