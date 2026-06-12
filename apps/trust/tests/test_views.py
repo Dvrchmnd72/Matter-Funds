@@ -2,13 +2,14 @@ import datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, Client as TestClient
 from django.urls import reverse
 
 from apps.firms.models import Firm
 from apps.clients.models import Client
 from apps.matters.models import Matter
-from apps.trust.models import TrustAccount, MatterLedger, Receipt
+from apps.trust.models import TrustAccount, MatterLedger, Receipt, Payment, Irregularity
 
 User = get_user_model()
 
@@ -88,3 +89,67 @@ class TrustViewTestCase(TestCase):
         response = self.tc.get('/dashboard/')
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Dashboard')
+
+
+    def test_manual_irregularity_create_authorised_get(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        response = self.tc.get(reverse('trust:irregularity_create'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'New Irregularity')
+
+    def test_manual_irregularity_create_client_denied(self):
+        self.tc.login(username='client_view', password='testpass123')
+        response = self.tc.get(reverse('trust:irregularity_create'))
+        self.assertIn(response.status_code, [403, 302])
+
+    def test_manual_irregularity_valid_post_and_list_visibility(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        response = self.tc.post(reverse('trust:irregularity_create'), {
+            'trust_account': self.trust_account.pk,
+            'discovered_on': str(datetime.date.today()),
+            'description': 'Manual deficiency report',
+            'amount': '123.45',
+            'reported_to_law_society_on': '',
+            'resolution': 'Rectified and reported.',
+        })
+        self.assertEqual(response.status_code, 302)
+        irregularity = Irregularity.objects.get(description='Manual deficiency report')
+        self.assertEqual(irregularity.amount, Decimal('123.45'))
+        list_response = self.tc.get(reverse('trust:irregularity_list'))
+        self.assertContains(list_response, 'Manual deficiency report')
+
+    def test_transfer_costs_to_office_authorised_get(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        response = self.tc.get(reverse('trust:transfer_costs_to_office_create', kwargs={'ledger_pk': self.ledger.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Transfer Costs to Office')
+
+    def test_transfer_costs_to_office_client_denied(self):
+        self.tc.login(username='client_view', password='testpass123')
+        response = self.tc.get(reverse('trust:transfer_costs_to_office_create', kwargs={'ledger_pk': self.ledger.pk}))
+        self.assertIn(response.status_code, [403, 302])
+
+    def test_transfer_costs_to_office_valid_post(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        self.ledger.balance = Decimal('1000.00')
+        self.ledger.save(update_fields=['balance'])
+        url = reverse('trust:transfer_costs_to_office_create', kwargs={'ledger_pk': self.ledger.pk})
+        response = self.tc.post(url, {
+            'amount': '250.00',
+            'date_paid': str(datetime.date.today()),
+            'payee_name': 'Office Account',
+            'payee_bsb': '062-000',
+            'payee_account': '123456789',
+            'payment_method': 'eft',
+            'cheque_number': '',
+            'purpose': 'Legal costs transfer',
+            'second_authoriser': '',
+            'costs_withdrawal_method': 'method_1_bill_issued',
+            'key_evidence_date': str(datetime.date.today()),
+            'costs_evidence_file': SimpleUploadedFile('bill.pdf', b'bill evidence'),
+            'costs_withdrawal_notes': 'Evidence retained.',
+        })
+        self.assertEqual(response.status_code, 302)
+        self.ledger.refresh_from_db()
+        self.assertEqual(self.ledger.balance, Decimal('750.00'))
+        self.assertEqual(Payment.objects.filter(transaction__transaction_type='transfer_to_office').count(), 1)

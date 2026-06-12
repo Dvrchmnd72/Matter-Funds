@@ -111,7 +111,7 @@ def payments_journal_pdf(trust_account, date_from, date_to):
     transactions = (
         TrustTransaction.objects
         .filter(
-            transaction_type='payment',
+            transaction_type__in=['payment', 'transfer_to_office'],
             matter_ledger__trust_account=trust_account,
             date_received_or_paid__range=(date_from, date_to),
         )
@@ -120,12 +120,13 @@ def payments_journal_pdf(trust_account, date_from, date_to):
     )
 
     buffer = io.BytesIO()
-    col_headers = ['Date', 'Payment #', 'Matter', 'Payee', 'Method', 'Amount ($)']
+    col_headers = ['Date', 'Type', 'Payment #', 'Matter', 'Payee', 'Method', 'Amount ($)']
     rows = []
     for txn in transactions:
         p = getattr(txn, 'payment', None)
         rows.append([
             str(txn.date_received_or_paid),
+            txn.get_transaction_type_display(),
             str(p.payment_number) if p else '',
             str(txn.matter_ledger.matter),
             p.payee_name if p else '',
@@ -249,6 +250,43 @@ def external_examiner_pack_zip(trust_account, year):
         for irr in irregularities:
             writer.writerow([irr.discovered_on, irr.description, irr.amount, irr.reported_to_law_society_on, irr.resolution])
         zf.writestr(f'irregularities_{year}.csv', irr_buf.getvalue())
+
+        costs_buf = io.StringIO()
+        writer = csv.writer(costs_buf)
+        writer.writerow([
+            'Date', 'Payment #', 'Matter', 'Amount', 'Withdrawal Method', 'Key Evidence Date',
+            'Payee', 'Evidence File?', 'Notice/Request File?', 'Authority/Agreement File?',
+            'Reimbursement Evidence File?', 'Notes',
+        ])
+        costs_transfers = (
+            TrustTransaction.objects
+            .filter(
+                transaction_type='transfer_to_office',
+                matter_ledger__trust_account=trust_account,
+                date_received_or_paid__range=(date_from, date_to),
+            )
+            .select_related('matter_ledger__matter', 'payment')
+            .order_by('date_received_or_paid', 'payment__payment_number')
+        )
+        for txn in costs_transfers:
+            payment = getattr(txn, 'payment', None)
+            if not payment:
+                continue
+            writer.writerow([
+                txn.date_received_or_paid,
+                payment.payment_number,
+                txn.matter_ledger.matter,
+                txn.amount,
+                payment.get_costs_withdrawal_method_display(),
+                payment.key_evidence_date or '',
+                payment.payee_name,
+                'Yes' if payment.costs_evidence_file else 'No',
+                'Yes' if payment.notice_or_request_file else 'No',
+                'Yes' if payment.authority_or_agreement_file else 'No',
+                'Yes' if payment.reimbursement_evidence_file else 'No',
+                payment.costs_withdrawal_notes,
+            ])
+        zf.writestr(f'costs_transfers_{year}.csv', costs_buf.getvalue())
 
         if HAS_OPENPYXL:
             wb = openpyxl.Workbook()
