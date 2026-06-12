@@ -1,4 +1,5 @@
 import datetime
+import calendar
 from decimal import Decimal
 
 from django.conf import settings
@@ -6,6 +7,14 @@ from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
+
+
+def _month_end_for(date_value):
+    return datetime.date(
+        date_value.year,
+        date_value.month,
+        calendar.monthrange(date_value.year, date_value.month)[1],
+    )
 
 
 class TrustAccount(models.Model):
@@ -105,6 +114,67 @@ class TrustTransaction(models.Model):
 
     def delete(self, *args, **kwargs):
         raise PermissionError("TrustTransaction records cannot be deleted.")
+
+
+class TrustAccountingPeriod(models.Model):
+    STATUS_OPEN = 'open'
+    STATUS_LOCKED = 'locked'
+    STATUS_CHOICES = [
+        (STATUS_OPEN, 'Open'),
+        (STATUS_LOCKED, 'Locked'),
+    ]
+
+    trust_account = models.ForeignKey(TrustAccount, on_delete=models.PROTECT, related_name='accounting_periods')
+    period_start = models.DateField()
+    period_end = models.DateField()
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_OPEN)
+    locked_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='trust_periods_locked')
+    locked_on = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Trust Accounting Period'
+        verbose_name_plural = 'Trust Accounting Periods'
+        ordering = ['-period_end']
+        constraints = [
+            models.UniqueConstraint(fields=['trust_account', 'period_start', 'period_end'], name='unique_trust_accounting_period'),
+            models.CheckConstraint(check=models.Q(period_start__lte=models.F('period_end')), name='trust_period_start_lte_end'),
+        ]
+        indexes = [
+            models.Index(fields=['trust_account', 'period_start', 'period_end']),
+            models.Index(fields=['trust_account', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.trust_account} - {self.period_start} to {self.period_end} ({self.get_status_display()})"
+
+    def clean(self):
+        errors = {}
+        if self.period_start:
+            if self.period_start.day != 1:
+                errors['period_start'] = 'Period start must be the first day of a month.'
+        if self.period_start and self.period_end:
+            expected_end = _month_end_for(self.period_start)
+            if self.period_end != expected_end:
+                errors['period_end'] = 'Period end must be the last day of the same month as the period start.'
+        if self.status == self.STATUS_LOCKED:
+            if not self.locked_by_id:
+                errors['locked_by'] = 'Locked periods must record who locked them.'
+            if not self.locked_on:
+                errors['locked_on'] = 'Locked periods must record when they were locked.'
+        elif self.status == self.STATUS_OPEN:
+            if self.locked_by_id:
+                errors['locked_by'] = 'Open periods cannot have locked-by metadata.'
+            if self.locked_on:
+                errors['locked_on'] = 'Open periods cannot have locked-on metadata.'
+        if errors:
+            raise ValidationError(errors)
+
+    def delete(self, *args, **kwargs):
+        if self.status == self.STATUS_LOCKED:
+            raise PermissionError('Locked accounting periods cannot be deleted.')
+        return super().delete(*args, **kwargs)
 
 
 class Receipt(models.Model):
@@ -266,6 +336,7 @@ class PowerMoneyEntry(models.Model):
 
 class MonthlyReconciliation(models.Model):
     trust_account = models.ForeignKey(TrustAccount, on_delete=models.PROTECT, related_name='reconciliations')
+    accounting_period = models.OneToOneField(TrustAccountingPeriod, on_delete=models.PROTECT, null=True, blank=True, related_name='reconciliation')
     period_end = models.DateField()
     cash_book_balance = models.DecimalField(max_digits=12, decimal_places=2)
     ledger_total_balance = models.DecimalField(max_digits=12, decimal_places=2)
@@ -274,8 +345,11 @@ class MonthlyReconciliation(models.Model):
     outstanding_deposits_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     reconciled_balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     is_reconciled = models.BooleanField(default=False)
+    is_finalised = models.BooleanField(default=False)
     signed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='reconciliations_signed')
     signed_on = models.DateTimeField(null=True, blank=True)
+    finalised_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='trust_reconciliations_finalised')
+    finalised_on = models.DateTimeField(null=True, blank=True)
     bank_statement_pdf = models.FileField(upload_to='trust/recons/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -288,6 +362,10 @@ class MonthlyReconciliation(models.Model):
         return f"Reconciliation {self.period_end} \u2013 {self.trust_account}"
 
     def save(self, *args, **kwargs):
+        if self.pk is not None:
+            old = type(self).objects.get(pk=self.pk)
+            if old.is_finalised:
+                raise PermissionError('Finalised reconciliations cannot be modified.')
         self.reconciled_balance = (
             self.bank_statement_balance
             - self.unpresented_cheques_total
@@ -311,6 +389,87 @@ class MonthlyReconciliation(models.Model):
                     'amount': abs(discrepancy),
                 }
             )
+
+    def clean(self):
+        errors = {}
+        if self.accounting_period_id:
+            if self.accounting_period.trust_account_id != self.trust_account_id:
+                errors['accounting_period'] = 'Accounting period must belong to the same trust account.'
+            if self.accounting_period.period_end != self.period_end:
+                errors['period_end'] = 'Period end must match the linked accounting period.'
+        if self.is_finalised:
+            if not self.is_reconciled:
+                errors['is_finalised'] = 'Only balanced reconciliations can be finalised.'
+            if not self.finalised_by_id:
+                errors['finalised_by'] = 'Finalised reconciliations must record who finalised them.'
+            if not self.finalised_on:
+                errors['finalised_on'] = 'Finalised reconciliations must record when they were finalised.'
+        if errors:
+            raise ValidationError(errors)
+
+    def delete(self, *args, **kwargs):
+        if self.is_finalised:
+            raise PermissionError('Finalised reconciliations cannot be deleted.')
+        return super().delete(*args, **kwargs)
+
+
+class TrustMonthlyRecord(models.Model):
+    RECORD_RECEIPTS_CASH_BOOK = 'receipts_cash_book'
+    RECORD_PAYMENTS_CASH_BOOK = 'payments_cash_book'
+    RECORD_TRUST_TRANSFER_JOURNAL = 'trust_transfer_journal'
+    RECORD_TRIAL_BALANCE = 'trial_balance'
+    RECORD_RECONCILIATION_STATEMENT = 'reconciliation_statement'
+
+    RECORD_TYPE_CHOICES = [
+        (RECORD_RECEIPTS_CASH_BOOK, 'Receipts Cash Book'),
+        (RECORD_PAYMENTS_CASH_BOOK, 'Payments Cash Book'),
+        (RECORD_TRUST_TRANSFER_JOURNAL, 'Trust Transfer Journal'),
+        (RECORD_TRIAL_BALANCE, 'Trial Balance'),
+        (RECORD_RECONCILIATION_STATEMENT, 'Reconciliation Statement'),
+    ]
+
+    accounting_period = models.ForeignKey(TrustAccountingPeriod, on_delete=models.PROTECT, related_name='monthly_records')
+    reconciliation = models.ForeignKey(MonthlyReconciliation, on_delete=models.PROTECT, related_name='monthly_records')
+    trust_account = models.ForeignKey(TrustAccount, on_delete=models.PROTECT, related_name='monthly_records')
+    record_type = models.CharField(max_length=40, choices=RECORD_TYPE_CHOICES)
+    pdf = models.FileField(upload_to='trust/monthly-records/')
+    generated_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='trust_monthly_records_generated')
+    generated_at = models.DateTimeField(auto_now_add=True)
+    sha256_hash = models.CharField(max_length=64)
+
+    class Meta:
+        verbose_name = 'Trust Monthly Record'
+        verbose_name_plural = 'Trust Monthly Records'
+        ordering = ['-generated_at']
+        constraints = [
+            models.UniqueConstraint(fields=['accounting_period', 'record_type'], name='unique_monthly_record_type_per_period'),
+        ]
+        indexes = [
+            models.Index(fields=['trust_account', 'record_type']),
+            models.Index(fields=['trust_account', 'generated_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.get_record_type_display()} - {self.accounting_period.period_end}"
+
+    def clean(self):
+        errors = {}
+        if self.sha256_hash and len(self.sha256_hash) != 64:
+            errors['sha256_hash'] = 'SHA256 hash must be 64 characters.'
+        if self.accounting_period_id and self.trust_account_id and self.accounting_period.trust_account_id != self.trust_account_id:
+            errors['trust_account'] = 'Monthly record trust account must match the accounting period.'
+        if self.reconciliation_id and self.trust_account_id and self.reconciliation.trust_account_id != self.trust_account_id:
+            errors['reconciliation'] = 'Monthly record trust account must match the reconciliation.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise PermissionError('Trust monthly records are immutable.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError('Trust monthly records cannot be deleted.')
 
 
 class Irregularity(models.Model):

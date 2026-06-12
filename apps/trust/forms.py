@@ -3,7 +3,7 @@ from decimal import Decimal
 from django import forms
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
-from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount
+from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount, TrustAccountingPeriod
 
 
 class ReceiptForm(forms.Form):
@@ -162,6 +162,46 @@ class ReconciliationForm(forms.ModelForm):
         self.helper = FormHelper()
         self.helper.form_tag = False
         self.helper.add_input(Submit('submit', 'Save Reconciliation'))
+
+    def clean_period_end(self):
+        period_end = self.cleaned_data['period_end']
+        import calendar
+        if period_end.day != calendar.monthrange(period_end.year, period_end.month)[1]:
+            raise forms.ValidationError('Period end must be the last day of a month.')
+        return period_end
+
+
+class ReconciliationFinaliseForm(forms.Form):
+    confirm = forms.BooleanField(
+        required=True,
+        label='I confirm this reconciliation is balanced and should be finalised.',
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.add_input(Submit('submit', 'Finalise Reconciliation'))
+
+
+class AccountingPeriodLockForm(forms.Form):
+    confirm = forms.BooleanField(
+        required=True,
+        label='I confirm this accounting period should be locked.',
+    )
+
+    def __init__(self, *args, **kwargs):
+        self.period = kwargs.pop('period', None)
+        super().__init__(*args, **kwargs)
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.add_input(Submit('submit', 'Lock Period'))
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.period and self.period.status == TrustAccountingPeriod.STATUS_LOCKED:
+            raise forms.ValidationError('This accounting period is already locked.')
+        return cleaned_data
 
 
 class IrregularityResolveForm(forms.ModelForm):

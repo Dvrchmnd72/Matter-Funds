@@ -3,7 +3,7 @@ import datetime
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db.models import Q
-from django.http import Http404
+from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy, reverse
 from django.views import View
@@ -14,11 +14,12 @@ from apps.trust import services
 from apps.trust import reports as trust_reports
 from .models import (
     TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment,
-    MonthlyReconciliation, Irregularity,
+    MonthlyReconciliation, Irregularity, TrustAccountingPeriod, TrustMonthlyRecord,
 )
 from .forms import (
     ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm,
     ManualIrregularityForm, IrregularityResolveForm, DateRangeForm, YearForm,
+    ReconciliationFinaliseForm, AccountingPeriodLockForm,
 )
 
 
@@ -234,7 +235,7 @@ class ReconciliationListView(StaffRequiredMixin, ListView):
     ordering = ['-period_end']
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related('trust_account')
+        qs = super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by')
         user = self.request.user
         if user.role != 'admin' and user.firm:
             qs = qs.filter(trust_account__firm=user.firm)
@@ -250,7 +251,13 @@ class ReconciliationCreateView(AdminOrAccountantMixin, CreateView):
         return get_object_or_404(TrustAccount, pk=self.kwargs['pk'])
 
     def form_valid(self, form):
-        form.instance.trust_account = self.get_trust_account()
+        trust_account = self.get_trust_account()
+        period = services.get_or_create_accounting_period(trust_account, form.cleaned_data['period_end'])
+        if period.status == TrustAccountingPeriod.STATUS_LOCKED:
+            form.add_error('period_end', 'This accounting period is locked.')
+            return self.form_invalid(form)
+        form.instance.trust_account = trust_account
+        form.instance.accounting_period = period
         messages.success(self.request, 'Reconciliation saved.')
         return super().form_valid(form)
 
@@ -267,6 +274,134 @@ class ReconciliationDetailView(StaffRequiredMixin, DetailView):
     model = MonthlyReconciliation
     template_name = 'trust/reconciliation_detail.html'
     context_object_name = 'reconciliation'
+
+    def get_queryset(self):
+        return super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by')
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        can_finalise, blockers = services.can_finalise_reconciliation(self.object)
+        ctx['can_finalise'] = can_finalise and self.request.user.role in ('admin', 'accountant')
+        ctx['finalise_blockers'] = blockers
+        ctx['monthly_records'] = self.object.monthly_records.all().order_by('record_type')
+        period = self.object.accounting_period
+        ctx['accounting_period'] = period
+        ctx['can_lock_period'] = (
+            period
+            and period.status == TrustAccountingPeriod.STATUS_OPEN
+            and self.object.is_finalised
+            and services.has_all_required_monthly_records(period)
+            and self.request.user.role in ('admin', 'accountant')
+        )
+        return ctx
+
+
+class ReconciliationFinaliseView(AdminOrAccountantMixin, FormView):
+    form_class = ReconciliationFinaliseForm
+    template_name = 'trust/reconciliation_finalise.html'
+
+    def get_reconciliation(self):
+        return get_object_or_404(MonthlyReconciliation.objects.select_related('trust_account', 'accounting_period'), pk=self.kwargs['pk'])
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        reconciliation = self.get_reconciliation()
+        ctx['reconciliation'] = reconciliation
+        ctx['can_finalise'], ctx['finalise_blockers'] = services.can_finalise_reconciliation(reconciliation)
+        return ctx
+
+    def form_valid(self, form):
+        reconciliation = self.get_reconciliation()
+        try:
+            services.finalise_reconciliation(reconciliation, self.request.user)
+            messages.success(self.request, 'Reconciliation finalised and monthly records generated.')
+            return redirect(reverse('trust:reconciliation_detail', kwargs={'pk': reconciliation.pk}))
+        except ValidationError as e:
+            form.add_error(None, e)
+            return self.form_invalid(form)
+
+
+class AccountingPeriodListView(StaffRequiredMixin, ListView):
+    model = TrustAccountingPeriod
+    template_name = 'trust/period_list.html'
+    context_object_name = 'periods'
+    ordering = ['-period_end']
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related('trust_account', 'locked_by')
+        user = self.request.user
+        if user.role != 'admin' and user.firm:
+            qs = qs.filter(trust_account__firm=user.firm)
+        return qs
+
+
+class AccountingPeriodDetailView(StaffRequiredMixin, DetailView):
+    model = TrustAccountingPeriod
+    template_name = 'trust/period_detail.html'
+    context_object_name = 'period'
+
+    def get_queryset(self):
+        return super().get_queryset().select_related('trust_account', 'locked_by').prefetch_related('monthly_records')
+
+
+class AccountingPeriodLockView(AdminOrAccountantMixin, FormView):
+    form_class = AccountingPeriodLockForm
+    template_name = 'trust/period_lock.html'
+
+    def get_period(self):
+        return get_object_or_404(TrustAccountingPeriod.objects.select_related('trust_account'), pk=self.kwargs['pk'])
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['period'] = self.get_period()
+        return kwargs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['period'] = self.get_period()
+        return ctx
+
+    def form_valid(self, form):
+        period = self.get_period()
+        try:
+            services.lock_accounting_period(period, self.request.user)
+            messages.success(self.request, 'Accounting period locked.')
+            return redirect(reverse('trust:period_detail', kwargs={'pk': period.pk}))
+        except ValidationError as e:
+            form.add_error(None, e)
+            return self.form_invalid(form)
+
+
+class MonthlyRecordListView(StaffRequiredMixin, ListView):
+    model = TrustMonthlyRecord
+    template_name = 'trust/monthly_record_list.html'
+    context_object_name = 'monthly_records'
+    ordering = ['-generated_at']
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related('trust_account', 'accounting_period', 'generated_by')
+        user = self.request.user
+        if user.role != 'admin' and user.firm:
+            qs = qs.filter(trust_account__firm=user.firm)
+        return qs
+
+
+class MonthlyRecordDetailView(StaffRequiredMixin, DetailView):
+    model = TrustMonthlyRecord
+    template_name = 'trust/monthly_record_detail.html'
+    context_object_name = 'monthly_record'
+
+    def get_queryset(self):
+        return super().get_queryset().select_related('trust_account', 'accounting_period', 'generated_by')
+
+
+class MonthlyRecordDownloadView(StaffRequiredMixin, View):
+    def get(self, request, pk):
+        record = get_object_or_404(TrustMonthlyRecord, pk=pk)
+        if not record.pdf:
+            raise Http404('Monthly record PDF not found.')
+        filename = f'{record.record_type}_{record.accounting_period.period_end}.pdf'
+        return FileResponse(record.pdf.open('rb'), as_attachment=True, filename=filename, content_type='application/pdf')
 
 
 class IrregularityListView(StaffRequiredMixin, ListView):
@@ -361,6 +496,19 @@ class PaymentsJournalPDFView(StaffRequiredMixin, View):
             date_from = datetime.date(datetime.date.today().year, 1, 1)
             date_to = datetime.date.today()
         return trust_reports.payments_journal_pdf(account, date_from, date_to)
+
+
+class TrustTransferJournalPDFView(StaffRequiredMixin, View):
+    def get(self, request, pk):
+        account = get_object_or_404(TrustAccount, pk=pk)
+        form = DateRangeForm(request.GET)
+        if form.is_valid():
+            date_from = form.cleaned_data.get('date_from') or datetime.date(datetime.date.today().year, 1, 1)
+            date_to = form.cleaned_data.get('date_to') or datetime.date.today()
+        else:
+            date_from = datetime.date(datetime.date.today().year, 1, 1)
+            date_to = datetime.date.today()
+        return trust_reports.trust_transfer_journal_pdf(account, date_from, date_to)
 
 
 class TrialBalancePDFView(StaffRequiredMixin, View):
