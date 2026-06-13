@@ -256,6 +256,7 @@ def create_payment(*, matter_ledger, amount, date_paid, payee_name, payee_bsb=''
             authorised_by=authorised_by,
             second_authoriser=second_authoriser,
         )
+        payment.full_clean()
         payment.save()
 
         ledger.balance = _quantize(ledger.balance - amount)
@@ -336,6 +337,7 @@ def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, p
             reimbursement_evidence_file=reimbursement_evidence_file,
             costs_withdrawal_notes=costs_withdrawal_notes,
         )
+        payment.full_clean()
         payment.save()
 
         ledger.balance = _quantize(ledger.balance - amount)
