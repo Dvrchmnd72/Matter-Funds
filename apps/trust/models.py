@@ -250,6 +250,10 @@ class Payment(models.Model):
         # by an authorised principal/associate. It does not mandate a second
         # authoriser, so dual authorisation remains optional firm policy rather
         # than a model-level compliance requirement.
+        if self.second_authoriser_id and self.second_authoriser_id == self.authorised_by_id:
+            raise ValidationError({
+                'second_authoriser': 'Second authoriser must be different from the primary authoriser.'
+            })
         return super().clean()
 
 
