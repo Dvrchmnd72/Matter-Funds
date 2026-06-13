@@ -34,7 +34,7 @@ class PaymentForm(forms.Form):
     cheque_number = forms.CharField(max_length=50, required=False)
     purpose = forms.CharField(max_length=500)
     second_authoriser = forms.ModelChoiceField(
-        queryset=None, required=False, help_text='Required for EFT on non-sole-practitioner firms.'
+        queryset=None, required=False, help_text='Optional firm policy authoriser; not required for NSW Rule 43 compliance.'
     )
 
     def __init__(self, *args, **kwargs):
@@ -59,7 +59,7 @@ class TransferCostsToOfficeForm(forms.Form):
     cheque_number = forms.CharField(max_length=50, required=False)
     purpose = forms.CharField(max_length=500, initial='Transfer legal costs to office account')
     second_authoriser = forms.ModelChoiceField(
-        queryset=None, required=False, help_text='Required for EFT on non-sole-practitioner firms.'
+        queryset=None, required=False, help_text='Optional firm policy authoriser; not required for NSW Rule 43 compliance.'
     )
     costs_withdrawal_method = forms.ChoiceField(choices=Payment.COSTS_WITHDRAWAL_METHOD_CHOICES)
     key_evidence_date = forms.DateField(
