@@ -229,13 +229,6 @@ def create_payment(*, matter_ledger, amount, date_paid, payee_name, payee_bsb=''
         if ledger.balance < amount:
             raise ValidationError(f"Insufficient trust funds: balance is {ledger.balance}, payment is {amount}.")
 
-        firm = ledger.trust_account.firm
-        if payment_method == 'eft' and not firm.is_sole_practitioner:
-            if not second_authoriser:
-                raise ValidationError("EFT payments require a second authoriser for non-sole-practitioner firms (R44).")
-            if second_authoriser.pk == authorised_by.pk:
-                raise ValidationError("Second authoriser must differ from the authorising person (R44).")
-
         trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
         payment_number = trust_account.next_payment_number
         trust_account.next_payment_number += 1
@@ -308,13 +301,6 @@ def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, p
 
         if ledger.balance < amount:
             raise ValidationError(f"Insufficient trust funds: balance is {ledger.balance}, transfer is {amount}.")
-
-        firm = ledger.trust_account.firm
-        if payment_method == 'eft' and not firm.is_sole_practitioner:
-            if not second_authoriser:
-                raise ValidationError("EFT payments require a second authoriser for non-sole-practitioner firms (R44).")
-            if second_authoriser.pk == authorised_by.pk:
-                raise ValidationError("Second authoriser must differ from the authorising person (R44).")
 
         trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
         payment_number = trust_account.next_payment_number

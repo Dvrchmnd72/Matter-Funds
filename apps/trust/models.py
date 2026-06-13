@@ -246,16 +246,11 @@ class Payment(models.Model):
         return f"Payment #{self.payment_number} \u2013 {self.payee_name} ${self.transaction.amount}"
 
     def clean(self):
-        if self.payment_method == 'eft':
-            try:
-                firm = self.transaction.matter_ledger.trust_account.firm
-            except Exception:
-                return
-            if not firm.is_sole_practitioner:
-                if not self.second_authoriser_id:
-                    raise ValidationError({'second_authoriser': 'EFT payments require a second authoriser for non-sole-practitioner firms (R44).'})
-                if self.second_authoriser_id == self.authorised_by_id:
-                    raise ValidationError({'second_authoriser': 'Second authoriser must differ from the authorising person (R44).'})
+        # NSW Rule 43 requires trust money withdrawals by EFT to be authorised
+        # by an authorised principal/associate. It does not mandate a second
+        # authoriser, so dual authorisation remains optional firm policy rather
+        # than a model-level compliance requirement.
+        return super().clean()
 
 
 class TrustJournal(models.Model):
