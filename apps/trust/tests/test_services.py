@@ -6,6 +6,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 from unittest.mock import patch
 
 from apps.firms.models import Firm
@@ -43,6 +44,88 @@ class TrustServiceTestCase(TestCase):
         self.ledger = MatterLedger.objects.create(
             matter=self.matter, trust_account=self.trust_account
         )
+
+    def test_eft_receipt_deposited_same_day_is_not_late(self):
+        received = datetime.date(2024, 1, 10)
+        receipt = create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('250.00'),
+            date_received=received, date_banked=received, payor_name='Client A',
+            payment_method='eft', purpose='Retainer', created_by=self.admin_user
+        )
+        self.assertFalse(receipt.late_banking)
+        self.assertEqual(receipt.transaction.date_banked, received)
+
+    def test_receipt_late_deposit_uses_five_working_day_window(self):
+        receipt = create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('250.00'),
+            date_received=datetime.date(2024, 1, 8),
+            date_banked=datetime.date(2024, 1, 16),
+            payor_name='Client A', payment_method='cash', purpose='Retainer',
+            created_by=self.admin_user
+        )
+        self.assertTrue(receipt.late_banking)
+
+    def test_receipts_cash_book_includes_nsw_receipt_dates(self):
+        receipt = create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('250.00'),
+            date_received=datetime.date(2024, 1, 9),
+            date_banked=datetime.date(2024, 1, 9), payor_name='Client A',
+            payment_method='direct_deposit', purpose='Retainer', created_by=self.admin_user
+        )
+        made_out = timezone.make_aware(datetime.datetime(2024, 1, 10, 9, 0))
+        TrustTransaction.objects.filter(pk=receipt.transaction_id).update(created_at=made_out)
+
+        captured = {}
+
+        def fake_build(buffer, trust_account, title, subtitle, rows, col_headers):
+            captured['rows'] = rows
+            captured['headers'] = col_headers
+            buffer.write(b'pdf')
+
+        with patch.object(trust_reports, '_build_pdf_document', side_effect=fake_build):
+            trust_reports.receipts_cash_book_pdf_bytes(
+                self.trust_account, datetime.date(2024, 1, 1), datetime.date(2024, 1, 31)
+            )
+
+        self.assertIn('Date receipt made out', captured['headers'])
+        self.assertIn('Date received / confirmed in trust account (if different)', captured['headers'])
+        self.assertIn('Date deposited to trust account', captured['headers'])
+        self.assertEqual(captured['rows'][0][0], '2024-01-10')
+        self.assertEqual(captured['rows'][0][1], '2024-01-09')
+        self.assertEqual(captured['rows'][0][2], '2024-01-09')
+
+    def test_receipt_pdf_includes_nsw_receipt_dates(self):
+        receipt = create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('250.00'),
+            date_received=datetime.date(2024, 1, 9),
+            date_banked=datetime.date(2024, 1, 9), payor_name='Client A',
+            payment_method='direct_deposit', purpose='Retainer', created_by=self.admin_user
+        )
+        TrustTransaction.objects.filter(pk=receipt.transaction_id).update(
+            created_at=timezone.make_aware(datetime.datetime(2024, 1, 10, 9, 0))
+        )
+        receipt = Receipt.objects.select_related('transaction__matter_ledger__trust_account').get(pk=receipt.pk)
+        captured = {}
+
+        class FakeTable:
+            def __init__(self, data):
+                captured['details'] = data
+            def setStyle(self, style):
+                pass
+
+        class FakeDoc:
+            def __init__(self, *args, **kwargs):
+                pass
+            def build(self, elements):
+                pass
+
+        with patch.object(trust_reports, 'Table', FakeTable), patch.object(trust_reports, 'SimpleDocTemplate', FakeDoc):
+            response = trust_reports.receipt_pdf(receipt)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(['Date receipt made out', '2024-01-10'], captured['details'])
+        self.assertIn(['Date received / confirmed in trust account', '2024-01-09'], captured['details'])
+        self.assertIn(['Date deposited to trust account', '2024-01-09'], captured['details'])
 
     def test_receipt_increments_balance(self):
         receipt = create_receipt(

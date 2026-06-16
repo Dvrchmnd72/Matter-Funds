@@ -84,9 +84,17 @@ class ReceiptCreateView(StaffRequiredMixin, View):
         )
         return get_object_or_404(queryset, pk=self.kwargs['ledger_pk'])
 
+    def get_context_data(self, form, ledger):
+        return {
+            'form': form,
+            'ledger': ledger,
+            'date_receipt_made_out': datetime.date.today(),
+        }
+
     def get(self, request, ledger_pk):
         form = ReceiptForm()
-        return render(request, self.template_name, {'form': form, 'ledger': self.get_ledger()})
+        ledger = self.get_ledger()
+        return render(request, self.template_name, self.get_context_data(form, ledger))
 
     def post(self, request, ledger_pk):
         ledger = self.get_ledger()
@@ -109,7 +117,7 @@ class ReceiptCreateView(StaffRequiredMixin, View):
                 return redirect(reverse('trust:receipt_detail', kwargs={'pk': receipt.pk}))
             except (ValidationError, Exception) as e:
                 messages.error(request, str(e))
-        return render(request, self.template_name, {'form': form, 'ledger': ledger})
+        return render(request, self.template_name, self.get_context_data(form, ledger))
 
 
 class ReceiptDetailView(StaffRequiredMixin, DetailView):
