@@ -27,7 +27,10 @@
     <h5 class="mt-3">Ledger Reconciliation / Trial Balance – Rule 48(2)(b)</h5>
     <form method="get" action="{% url 'trust:trial_balance_pdf' account.pk %}" class="row g-2 mb-2">
       <div class="col-auto"><label class="form-label form-label-sm" for="as-at-{{ account.pk }}">As at date</label></div>
-      <div class="col-auto"><input id="as-at-{{ account.pk }}" type="date" name="as_at" class="form-control form-control-sm"></div>
+      <div class="col-auto">
+        <input id="as-at-{{ account.pk }}" type="date" name="as_at" class="form-control form-control-sm{% if account.trial_balance_error %} is-invalid{% endif %}" value="{{ account.trial_balance_as_at_value }}"{% if account.trial_balance_error %} aria-describedby="as-at-{{ account.pk }}-error" aria-invalid="true"{% endif %}>
+        {% if account.trial_balance_error %}<div id="as-at-{{ account.pk }}-error" class="invalid-feedback d-block">{{ account.trial_balance_error }}</div>{% endif %}
+      </div>
       <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-secondary">Ledger Reconciliation PDF</button></div>
     </form>
     <h5 class="mt-3">Examiner Pack (select year)</h5>
