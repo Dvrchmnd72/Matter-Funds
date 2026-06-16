@@ -26,6 +26,7 @@ from apps.trust.services import (
     create_receipt,
     create_transfer_to_office,
     create_trust_journal,
+    calculate_historical_ledger_total,
     finalise_reconciliation,
     get_or_create_accounting_period,
     lock_accounting_period,
@@ -238,6 +239,79 @@ class PhaseAMonthlyCloseTestCase(TestCase):
             self.assertTrue(record.pdf)
             self.assertEqual(len(record.sha256_hash), 64)
             self.assertEqual(record.generated_by, self.admin)
+
+    def test_matching_historical_balances_allow_finalisation(self):
+        reconciliation = self.create_balanced_reconciliation()
+
+        finalised = finalise_reconciliation(reconciliation, self.admin)
+        finalised.refresh_from_db()
+
+        self.assertTrue(finalised.is_finalised)
+        self.assertEqual(
+            calculate_historical_ledger_total(self.trust_account, self.period_end),
+            Decimal('1000.00'),
+        )
+
+    def test_mismatched_historical_ledger_total_blocks_finalisation(self):
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('5000.00'), date_received=datetime.date(2024, 2, 1),
+            payor_name='Client', payment_method='eft', purpose='Future retainer', created_by=self.admin,
+        )
+        period = get_or_create_accounting_period(self.trust_account, self.period_end)
+        reconciliation = MonthlyReconciliation.objects.create(
+            trust_account=self.trust_account,
+            accounting_period=period,
+            period_end=self.period_end,
+            cash_book_balance=Decimal('5000.00'),
+            ledger_total_balance=Decimal('5000.00'),
+            bank_statement_balance=Decimal('5000.00'),
+            unpresented_cheques_total=Decimal('0.00'),
+            outstanding_deposits_total=Decimal('0.00'),
+            bank_statement_pdf=SimpleUploadedFile('statement.pdf', b'bank statement', content_type='application/pdf'),
+        )
+
+        with self.assertRaisesMessage(ValidationError, 'historical trial balance total: 0.00'):
+            finalise_reconciliation(reconciliation, self.admin)
+
+        reconciliation.refresh_from_db()
+        self.assertFalse(reconciliation.is_finalised)
+        self.assertEqual(reconciliation.monthly_records.count(), 0)
+
+    def test_monthly_records_generated_after_finalisation_use_consistent_totals(self):
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('1000.00'), date_received=self.txn_date,
+            payor_name='Client', payment_method='eft', purpose='Retainer', created_by=self.admin,
+        )
+        create_payment(
+            matter_ledger=self.ledger, amount=Decimal('250.00'), date_paid=datetime.date(2024, 1, 20),
+            payee_name='Payee', payment_method='eft', purpose='Disbursement',
+            authorised_by=self.admin, created_by=self.admin,
+        )
+        period = get_or_create_accounting_period(self.trust_account, self.period_end)
+        reconciliation = MonthlyReconciliation.objects.create(
+            trust_account=self.trust_account,
+            accounting_period=period,
+            period_end=self.period_end,
+            cash_book_balance=Decimal('750.00'),
+            ledger_total_balance=Decimal('750.00'),
+            bank_statement_balance=Decimal('750.00'),
+            unpresented_cheques_total=Decimal('0.00'),
+            outstanding_deposits_total=Decimal('0.00'),
+            bank_statement_pdf=SimpleUploadedFile('statement.pdf', b'bank statement', content_type='application/pdf'),
+        )
+
+        finalised = finalise_reconciliation(reconciliation, self.admin)
+        finalised.refresh_from_db()
+
+        self.assertEqual(calculate_historical_ledger_total(self.trust_account, self.period_end), Decimal('750.00'))
+        self.assertEqual(finalised.ledger_total_balance, Decimal('750.00'))
+        self.assertEqual(finalised.cash_book_balance, Decimal('750.00'))
+        self.assertTrue(
+            finalised.monthly_records.filter(record_type=TrustMonthlyRecord.RECORD_TRIAL_BALANCE).exists()
+        )
+        self.assertTrue(
+            finalised.monthly_records.filter(record_type=TrustMonthlyRecord.RECORD_RECONCILIATION_STATEMENT).exists()
+        )
 
     def test_balanced_reconciliation_can_be_finalised_without_bank_statement_pdf(self):
         reconciliation = self.create_balanced_reconciliation_without_bank_statement()
