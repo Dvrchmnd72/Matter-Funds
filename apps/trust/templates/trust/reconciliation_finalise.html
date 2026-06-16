@@ -9,6 +9,11 @@
   <ul>{% for blocker in finalise_blockers %}<li>{{ blocker }}</li>{% endfor %}</ul>
 </div>
 {% endif %}
+{% if not reconciliation.bank_statement_pdf %}
+<div class="alert alert-warning">
+  Bank statement evidence is outstanding. You can finalise this balanced reconciliation, but upload the bank statement evidence when available.
+</div>
+{% endif %}
 <dl class="row">
   <dt class="col-sm-4">Trust Account</dt><dd class="col-sm-8">{{ reconciliation.trust_account }}</dd>
   <dt class="col-sm-4">Balanced</dt><dd class="col-sm-8">{{ reconciliation.is_reconciled|yesno:"Yes,No" }}</dd>

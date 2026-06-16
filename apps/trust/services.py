@@ -124,8 +124,6 @@ def can_finalise_reconciliation(reconciliation):
         reasons.append('Reconciliation is already finalised.')
     if not reconciliation.is_reconciled:
         reasons.append('Reconciliation is not balanced.')
-    if not reconciliation.bank_statement_pdf:
-        reasons.append('Bank statement PDF is required.')
     if not reconciliation.accounting_period_id:
         reasons.append('Reconciliation is not linked to an accounting period.')
     elif reconciliation.accounting_period.status == TrustAccountingPeriod.STATUS_LOCKED:

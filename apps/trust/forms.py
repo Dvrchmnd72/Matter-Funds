@@ -155,6 +155,20 @@ class ReconciliationForm(forms.ModelForm):
         return period_end
 
 
+class ReconciliationBankStatementForm(forms.ModelForm):
+    class Meta:
+        model = MonthlyReconciliation
+        fields = ['bank_statement_pdf']
+        labels = {'bank_statement_pdf': 'Bank statement PDF'}
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['bank_statement_pdf'].required = True
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.add_input(Submit('submit', 'Save Bank Statement'))
+
+
 class ReconciliationFinaliseForm(forms.Form):
     confirm = forms.BooleanField(
         required=True,

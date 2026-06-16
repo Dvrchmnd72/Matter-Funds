@@ -151,6 +151,23 @@ class PhaseAMonthlyCloseTestCase(TestCase):
             bank_statement_pdf=SimpleUploadedFile('statement.pdf', b'bank statement', content_type='application/pdf'),
         )
 
+    def create_balanced_reconciliation_without_bank_statement(self):
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('1000.00'), date_received=self.txn_date,
+            payor_name='Client', payment_method='eft', purpose='Retainer', created_by=self.admin,
+        )
+        period = get_or_create_accounting_period(self.trust_account, self.period_end)
+        return MonthlyReconciliation.objects.create(
+            trust_account=self.trust_account,
+            accounting_period=period,
+            period_end=self.period_end,
+            cash_book_balance=Decimal('1000.00'),
+            ledger_total_balance=Decimal('1000.00'),
+            bank_statement_balance=Decimal('1000.00'),
+            unpresented_cheques_total=Decimal('0.00'),
+            outstanding_deposits_total=Decimal('0.00'),
+        )
+
     def finalise_and_lock_period(self):
         reconciliation = self.create_balanced_reconciliation()
         finalise_reconciliation(reconciliation, self.admin)
@@ -221,6 +238,92 @@ class PhaseAMonthlyCloseTestCase(TestCase):
             self.assertTrue(record.pdf)
             self.assertEqual(len(record.sha256_hash), 64)
             self.assertEqual(record.generated_by, self.admin)
+
+    def test_balanced_reconciliation_can_be_finalised_without_bank_statement_pdf(self):
+        reconciliation = self.create_balanced_reconciliation_without_bank_statement()
+        finalised = finalise_reconciliation(reconciliation, self.admin)
+        finalised.refresh_from_db()
+        self.assertTrue(finalised.is_finalised)
+        self.assertFalse(bool(finalised.bank_statement_pdf))
+        self.assertEqual(finalised.monthly_records.count(), 5)
+
+    def test_finalised_reconciliation_without_bank_statement_shows_evidence_outstanding(self):
+        reconciliation = self.create_balanced_reconciliation_without_bank_statement()
+        finalise_reconciliation(reconciliation, self.admin)
+        self.client.login(username='phase_admin', password='pass')
+
+        response = self.client.get(reverse('trust:reconciliation_detail', kwargs={'pk': reconciliation.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Bank statement evidence')
+        self.assertContains(response, 'Outstanding')
+        self.assertNotContains(response, 'Upload Bank Statement')
+
+    def test_bank_statement_can_be_uploaded_before_finalisation(self):
+        reconciliation = self.create_balanced_reconciliation_without_bank_statement()
+        self.client.login(username='phase_admin', password='pass')
+
+        response = self.client.post(
+            reverse('trust:reconciliation_bank_statement', kwargs={'pk': reconciliation.pk}),
+            {'bank_statement_pdf': SimpleUploadedFile('statement.pdf', b'first statement', content_type='application/pdf')},
+        )
+
+        self.assertRedirects(response, reverse('trust:reconciliation_detail', kwargs={'pk': reconciliation.pk}))
+        reconciliation.refresh_from_db()
+        self.assertTrue(reconciliation.bank_statement_pdf.name.endswith('statement.pdf'))
+
+    def test_bank_statement_can_be_replaced_before_finalisation(self):
+        reconciliation = self.create_balanced_reconciliation()
+        original_name = reconciliation.bank_statement_pdf.name
+        self.client.login(username='phase_admin', password='pass')
+
+        response = self.client.post(
+            reverse('trust:reconciliation_bank_statement', kwargs={'pk': reconciliation.pk}),
+            {'bank_statement_pdf': SimpleUploadedFile('replacement.pdf', b'replacement statement', content_type='application/pdf')},
+        )
+
+        self.assertRedirects(response, reverse('trust:reconciliation_detail', kwargs={'pk': reconciliation.pk}))
+        reconciliation.refresh_from_db()
+        self.assertNotEqual(reconciliation.bank_statement_pdf.name, original_name)
+        self.assertTrue(reconciliation.bank_statement_pdf.name.endswith('replacement.pdf'))
+
+    def test_bank_statement_can_be_downloaded_when_uploaded(self):
+        reconciliation = self.create_balanced_reconciliation()
+        self.client.login(username='phase_admin', password='pass')
+
+        response = self.client.get(
+            reverse('trust:reconciliation_bank_statement', kwargs={'pk': reconciliation.pk}),
+            {'download': '1'},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b''.join(response.streaming_content), b'bank statement')
+        self.assertIn('attachment;', response['Content-Disposition'])
+
+    def test_bank_statement_cannot_be_replaced_after_finalisation(self):
+        reconciliation = self.create_balanced_reconciliation()
+        original_name = reconciliation.bank_statement_pdf.name
+        finalise_reconciliation(reconciliation, self.admin)
+        self.client.login(username='phase_admin', password='pass')
+
+        response = self.client.post(
+            reverse('trust:reconciliation_bank_statement', kwargs={'pk': reconciliation.pk}),
+            {'bank_statement_pdf': SimpleUploadedFile('replacement.pdf', b'replacement statement', content_type='application/pdf')},
+        )
+
+        self.assertRedirects(response, reverse('trust:reconciliation_detail', kwargs={'pk': reconciliation.pk}))
+        reconciliation.refresh_from_db()
+        self.assertEqual(reconciliation.bank_statement_pdf.name, original_name)
+
+    def test_existing_reconciliation_pdf_download_still_works(self):
+        reconciliation = self.create_balanced_reconciliation_without_bank_statement()
+        finalise_reconciliation(reconciliation, self.admin)
+        self.client.login(username='phase_admin', password='pass')
+
+        response = self.client.get(reverse('trust:reconciliation_pdf', kwargs={'pk': reconciliation.pk}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
 
     def test_finalised_reconciliation_and_monthly_records_are_immutable(self):
         reconciliation = self.create_balanced_reconciliation()

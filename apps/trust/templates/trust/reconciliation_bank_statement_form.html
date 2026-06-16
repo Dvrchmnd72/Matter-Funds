@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block title %}Bank Statement Evidence – Matter Funds{% endblock %}
+{% block content %}
+<h1>{% if reconciliation.bank_statement_pdf %}Replace{% else %}Upload{% endif %} Bank Statement – {{ reconciliation.period_end }}</h1>
+<p class="text-muted">Upload the bank statement evidence supporting this monthly reconciliation.</p>
+<form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form|crispy }}<button type="submit" class="btn btn-primary">Save Bank Statement</button></form>
+<a href="{% url 'trust:reconciliation_detail' reconciliation.pk %}" class="btn btn-secondary mt-2">Back</a>
+{% endblock %}

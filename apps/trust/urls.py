@@ -17,6 +17,7 @@ urlpatterns = [
     path('reconciliations/', views.ReconciliationListView.as_view(), name='reconciliation_list'),
     path('accounts/<int:pk>/reconciliations/new/', views.ReconciliationCreateView.as_view(), name='reconciliation_create'),
     path('reconciliations/<int:pk>/', views.ReconciliationDetailView.as_view(), name='reconciliation_detail'),
+    path('reconciliations/<int:pk>/bank-statement/', views.ReconciliationBankStatementView.as_view(), name='reconciliation_bank_statement'),
     path('reconciliations/<int:pk>/finalise/', views.ReconciliationFinaliseView.as_view(), name='reconciliation_finalise'),
     path('monthly-records/', views.MonthlyRecordListView.as_view(), name='monthly_record_list'),
     path('monthly-records/<int:pk>/', views.MonthlyRecordDetailView.as_view(), name='monthly_record_detail'),

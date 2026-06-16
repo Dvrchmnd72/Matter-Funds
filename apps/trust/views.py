@@ -19,7 +19,7 @@ from .models import (
 from .forms import (
     ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm,
     ManualIrregularityForm, IrregularityResolveForm, DateRangeForm, YearForm,
-    ReconciliationFinaliseForm, AccountingPeriodLockForm,
+    ReconciliationFinaliseForm, AccountingPeriodLockForm, ReconciliationBankStatementForm,
 )
 
 
@@ -353,6 +353,48 @@ class ReconciliationDetailView(StaffRequiredMixin, DetailView):
             and self.request.user.role in ('admin', 'accountant')
         )
         return ctx
+
+
+class ReconciliationBankStatementView(AdminOrAccountantMixin, UpdateView):
+    model = MonthlyReconciliation
+    form_class = ReconciliationBankStatementForm
+    template_name = 'trust/reconciliation_bank_statement_form.html'
+    context_object_name = 'reconciliation'
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by'),
+            self.request.user,
+        )
+
+    def get(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if request.GET.get('download'):
+            if not self.object.bank_statement_pdf:
+                raise Http404('Bank statement PDF not found.')
+            return FileResponse(
+                self.object.bank_statement_pdf.open('rb'),
+                as_attachment=True,
+                filename=self.object.bank_statement_pdf.name.split('/')[-1],
+            )
+        if self.object.is_finalised:
+            messages.warning(request, 'Finalised reconciliations cannot have bank statement evidence replaced.')
+            return redirect(self.get_success_url())
+        return super().get(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if self.object.is_finalised:
+            messages.error(request, 'Finalised reconciliations cannot have bank statement evidence replaced.')
+            return redirect(self.get_success_url())
+        return super().post(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        messages.success(self.request, 'Bank statement evidence saved.')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('trust:reconciliation_detail', kwargs={'pk': self.object.pk})
 
 
 class ReconciliationFinaliseView(AdminOrAccountantMixin, FormView):
