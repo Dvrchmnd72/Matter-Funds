@@ -2,10 +2,11 @@ import datetime
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db.models import Q
-from django.http import FileResponse, Http404
+from django.http import FileResponse, Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy, reverse
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, TemplateView, FormView
 
@@ -658,7 +659,15 @@ class TrialBalancePDFView(StaffRequiredMixin, View):
             scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
             pk=pk,
         )
-        as_at = datetime.date.today()
+        as_at_param = request.GET.get('as_at')
+        if as_at_param:
+            as_at = parse_date(as_at_param)
+            if as_at is None:
+                return HttpResponseBadRequest('Invalid as_at date. Use YYYY-MM-DD.')
+        else:
+            as_at = timezone.localdate()
+        if as_at > timezone.localdate():
+            return HttpResponseBadRequest('as_at date cannot be in the future.')
         return trust_reports.trust_trial_balance_pdf(account, as_at)
 
 

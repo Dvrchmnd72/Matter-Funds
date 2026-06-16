@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import IntegrityError
 from django.test import TestCase
+from django.http import HttpResponse
 from django.urls import reverse
 from django.utils import timezone
 
@@ -707,3 +708,107 @@ class Rule48ReconciliationTimingTestCase(TestCase):
         self.assertEqual(reconciliation.reconciliation_due_date, datetime.date(2024, 5, 21))
         self.assertFalse(reconciliation.prepared_within_required_period)
         self.assertEqual(reconciliation.working_days_late, 2)
+
+class Rule48LedgerReconciliationReportTestCase(PhaseAMonthlyCloseTestCase):
+    def test_reports_page_shows_separate_as_at_input(self):
+        self.client.login(username='phase_admin', password='pass')
+        response = self.client.get(reverse('trust:reports'))
+        self.assertContains(response, 'Ledger Reconciliation / Trial Balance – Rule 48(2)(b)')
+        self.assertContains(response, 'name="as_at"')
+        self.assertContains(response, 'Ledger Reconciliation PDF')
+
+    def test_trial_balance_pdf_view_uses_selected_as_at_date(self):
+        from unittest.mock import patch
+        self.client.login(username='phase_admin', password='pass')
+        with patch('apps.trust.reports.trust_trial_balance_pdf', return_value=HttpResponse(content_type='application/pdf')) as mocked:
+            response = self.client.get(
+                reverse('trust:trial_balance_pdf', kwargs={'pk': self.trust_account.pk}),
+                {'as_at': '2026-05-31'},
+            )
+        self.assertEqual(response.status_code, 200)
+        mocked.assert_called_once_with(self.trust_account, datetime.date(2026, 5, 31))
+
+    def test_trial_balance_pdf_view_defaults_to_localdate(self):
+        from unittest.mock import patch
+        self.client.login(username='phase_admin', password='pass')
+        with patch('apps.trust.views.timezone.localdate', return_value=datetime.date(2026, 6, 16)):
+            with patch('apps.trust.reports.trust_trial_balance_pdf', return_value=HttpResponse(content_type='application/pdf')) as mocked:
+                response = self.client.get(reverse('trust:trial_balance_pdf', kwargs={'pk': self.trust_account.pk}))
+        self.assertEqual(response.status_code, 200)
+        mocked.assert_called_once_with(self.trust_account, datetime.date(2026, 6, 16))
+
+    def test_trial_balance_pdf_view_blocks_future_as_at_date(self):
+        from unittest.mock import patch
+        self.client.login(username='phase_admin', password='pass')
+        with patch('apps.trust.views.timezone.localdate', return_value=datetime.date(2026, 6, 16)):
+            response = self.client.get(
+                reverse('trust:trial_balance_pdf', kwargs={'pk': self.trust_account.pk}),
+                {'as_at': '2026-06-17'},
+            )
+        self.assertEqual(response.status_code, 400)
+
+    def test_ledger_reconciliation_as_at_date_and_cutoff_balances(self):
+        from unittest.mock import patch
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('100.00'), date_received=datetime.date(2026, 5, 31),
+            payor_name='Phase Client', payment_method='eft', purpose='May retainer', created_by=self.admin,
+        )
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('50.00'), date_received=datetime.date(2026, 6, 1),
+            payor_name='Phase Client', payment_method='eft', purpose='June retainer', created_by=self.admin,
+        )
+        captured = {}
+        def fake_build(buffer, trust_account, title, period_str, rows, col_headers):
+            captured.update(title=title, period_str=period_str, rows=rows, col_headers=col_headers)
+            buffer.write(b'%PDF test')
+        with patch('apps.trust.reports._build_pdf_document', side_effect=fake_build):
+            trust_reports.trial_balance_pdf_bytes(self.trust_account, datetime.date(2026, 5, 31))
+        self.assertEqual(captured['period_str'], 'As at 2026-05-31')
+        self.assertEqual(captured['title'], 'Trust Trial Balance Statement / Ledger Reconciliation – Rule 48(2)(b)')
+        self.assertEqual(captured['col_headers'], ['Ledger name', 'Identifying reference', 'Matter description', 'Balance ($)'])
+        self.assertIn(['P001 – Phase Matter', 'P001', 'Phase Matter', '100.00'], captured['rows'])
+        self.assertIn(['TOTAL', '', '', '100.00'], captured['rows'])
+
+    def test_stored_monthly_trial_balance_uses_period_end_and_is_immutable(self):
+        from unittest.mock import patch
+        reconciliation = self.create_balanced_reconciliation()
+        captured = {}
+        real_builder = trust_reports.trial_balance_pdf_bytes
+        def fake_trial_balance(trust_account, as_at):
+            captured['as_at'] = as_at
+            return real_builder(trust_account, as_at)
+        with patch('apps.trust.reports.trial_balance_pdf_bytes', side_effect=fake_trial_balance):
+            finalise_reconciliation(reconciliation, self.admin)
+        self.assertEqual(captured['as_at'], self.period_end)
+        record = TrustMonthlyRecord.objects.get(record_type=TrustMonthlyRecord.RECORD_TRIAL_BALANCE)
+        stored_bytes = record.pdf.read()
+        stored_hash = record.sha256_hash
+        self.assertIn(b'%PDF', stored_bytes[:20])
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('500.00'), date_received=datetime.date(2024, 2, 1),
+            payor_name='Phase Client', payment_method='eft', purpose='Later retainer', created_by=self.admin,
+        )
+        record.refresh_from_db()
+        self.assertEqual(record.sha256_hash, stored_hash)
+        self.assertEqual(record.pdf.read(), stored_bytes)
+
+    def test_period_detail_shows_direct_monthly_record_download_links(self):
+        reconciliation = self.create_balanced_reconciliation()
+        finalise_reconciliation(reconciliation, self.admin)
+        self.client.login(username='phase_admin', password='pass')
+        response = self.client.get(reverse('trust:period_detail', kwargs={'pk': reconciliation.accounting_period.pk}))
+        for record_type in required_monthly_record_types():
+            record = TrustMonthlyRecord.objects.get(record_type=record_type)
+            self.assertContains(response, reverse('trust:monthly_record_download', kwargs={'pk': record.pk}))
+        self.assertContains(response, 'immutable stored PDFs')
+
+    def test_monthly_record_download_serves_stored_pdf_without_regeneration(self):
+        from unittest.mock import patch
+        reconciliation = self.create_balanced_reconciliation()
+        finalise_reconciliation(reconciliation, self.admin)
+        record = TrustMonthlyRecord.objects.get(record_type=TrustMonthlyRecord.RECORD_TRIAL_BALANCE)
+        self.client.login(username='phase_admin', password='pass')
+        with patch('apps.trust.reports.trial_balance_pdf_bytes', side_effect=AssertionError('must not regenerate')):
+            response = self.client.get(reverse('trust:monthly_record_download', kwargs={'pk': record.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
