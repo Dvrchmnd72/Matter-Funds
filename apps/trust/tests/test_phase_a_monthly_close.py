@@ -594,3 +594,116 @@ class PhaseAMonthlyCloseTestCase(TestCase):
         self.assertTrue(trust_reports.trust_transfer_journal_pdf_bytes(self.trust_account, datetime.date(2024, 1, 1), self.period_end).startswith(b'%PDF'))
         self.assertTrue(trust_reports.trial_balance_pdf_bytes(self.trust_account, self.period_end).startswith(b'%PDF'))
         self.assertTrue(trust_reports.reconciliation_statement_pdf_bytes(reconciliation).startswith(b'%PDF'))
+
+class Rule48ReconciliationTimingTestCase(TestCase):
+    setUp = PhaseAMonthlyCloseTestCase.setUp
+    create_balanced_reconciliation = PhaseAMonthlyCloseTestCase.create_balanced_reconciliation
+
+    def _balanced_reconciliation_for(self, period_end):
+        period = get_or_create_accounting_period(self.trust_account, period_end)
+        return MonthlyReconciliation.objects.create(
+            trust_account=self.trust_account,
+            accounting_period=period,
+            period_end=period_end,
+            cash_book_balance=Decimal('0.00'),
+            ledger_total_balance=Decimal('0.00'),
+            bank_statement_balance=Decimal('0.00'),
+            unpresented_cheques_total=Decimal('0.00'),
+            outstanding_deposits_total=Decimal('0.00'),
+            bank_statement_pdf=SimpleUploadedFile('statement.pdf', b'bank statement', content_type='application/pdf'),
+        )
+
+    def test_cannot_create_reconciliation_for_period_end_today(self):
+        period_end = datetime.date(2026, 6, 30)
+        with self.settings(USE_TZ=True):
+            from unittest.mock import patch
+            with patch('apps.trust.models.timezone.localdate', return_value=period_end):
+                with self.assertRaises(ValidationError):
+                    self._balanced_reconciliation_for(period_end)
+
+    def test_cannot_create_reconciliation_for_future_period_end(self):
+        period_end = datetime.date(2026, 6, 30)
+        from unittest.mock import patch
+        with patch('apps.trust.models.timezone.localdate', return_value=datetime.date(2026, 6, 16)):
+            with self.assertRaises(ValidationError):
+                self._balanced_reconciliation_for(period_end)
+
+    def test_can_create_reconciliation_for_month_end_yesterday_or_earlier(self):
+        period_end = datetime.date(2026, 6, 30)
+        from unittest.mock import patch
+        with patch('apps.trust.models.timezone.localdate', return_value=datetime.date(2026, 7, 1)):
+            reconciliation = self._balanced_reconciliation_for(period_end)
+        self.assertEqual(reconciliation.period_end, period_end)
+
+    def test_period_end_must_be_calendar_month_end(self):
+        period_end = datetime.date(2026, 6, 29)
+        from unittest.mock import patch
+        with patch('apps.trust.models.timezone.localdate', return_value=datetime.date(2026, 7, 1)):
+            with self.assertRaises(ValidationError):
+                MonthlyReconciliation.objects.create(
+                    trust_account=self.trust_account,
+                    period_end=period_end,
+                    cash_book_balance=Decimal('0.00'),
+                    ledger_total_balance=Decimal('0.00'),
+                    bank_statement_balance=Decimal('0.00'),
+                )
+
+    def test_cannot_finalise_reconciliation_before_period_end_has_passed(self):
+        period_end = datetime.date(2026, 6, 30)
+        from unittest.mock import patch
+        with patch('apps.trust.models.timezone.localdate', return_value=datetime.date(2026, 7, 1)):
+            reconciliation = self._balanced_reconciliation_for(period_end)
+        with patch('apps.trust.services.timezone.localdate', return_value=period_end):
+            with self.assertRaises(ValidationError):
+                finalise_reconciliation(reconciliation, self.admin)
+
+    def test_cannot_lock_period_before_period_end_has_passed(self):
+        period_end = datetime.date(2026, 6, 30)
+        from unittest.mock import patch
+        with patch('apps.trust.models.timezone.localdate', return_value=datetime.date(2026, 7, 1)):
+            reconciliation = self._balanced_reconciliation_for(period_end)
+        with patch('apps.trust.services.timezone.localdate', return_value=datetime.date(2026, 7, 1)):
+            finalised = finalise_reconciliation(reconciliation, self.admin)
+        with patch('apps.trust.services.timezone.localdate', return_value=period_end):
+            with self.assertRaises(ValidationError):
+                lock_accounting_period(finalised.accounting_period, self.admin)
+
+    def test_reconciliation_statement_pdf_shows_date_statement_prepared(self):
+        from unittest.mock import patch
+        reconciliation = self.create_balanced_reconciliation()
+        finalise_reconciliation(reconciliation, self.admin)
+        captured = {}
+        def fake_build(buffer, trust_account, title, period_str, rows, col_headers):
+            captured['rows'] = rows
+            buffer.write(b'%PDF test')
+        with patch('apps.trust.reports._build_pdf_document', side_effect=fake_build):
+            trust_reports.reconciliation_statement_pdf_bytes(reconciliation)
+        labels = [row[0] for row in captured['rows']]
+        self.assertIn('Date statement prepared', labels)
+
+    def test_trial_balance_pdf_shows_date_statement_prepared(self):
+        from unittest.mock import patch
+        reconciliation = self.create_balanced_reconciliation()
+        finalise_reconciliation(reconciliation, self.admin)
+        captured = {}
+        def fake_build(buffer, trust_account, title, period_str, rows, col_headers):
+            captured['rows'] = rows
+            buffer.write(b'%PDF test')
+        with patch('apps.trust.reports._build_pdf_document', side_effect=fake_build):
+            trust_reports.trial_balance_pdf_bytes(self.trust_account, self.period_end)
+        labels = [row[0] for row in captured['rows']]
+        self.assertIn('Date statement prepared', labels)
+
+    def test_finalisation_within_15_working_days_is_on_time(self):
+        reconciliation = self._balanced_reconciliation_for(datetime.date(2024, 4, 30))
+        reconciliation.finalised_on = timezone.make_aware(datetime.datetime(2024, 5, 21, 10, 0))
+        self.assertEqual(reconciliation.reconciliation_due_date, datetime.date(2024, 5, 21))
+        self.assertTrue(reconciliation.prepared_within_required_period)
+        self.assertEqual(reconciliation.working_days_late, 0)
+
+    def test_finalisation_after_15_working_days_is_late_but_allowed(self):
+        reconciliation = self._balanced_reconciliation_for(datetime.date(2024, 4, 30))
+        reconciliation.finalised_on = timezone.make_aware(datetime.datetime(2024, 5, 23, 10, 0))
+        self.assertEqual(reconciliation.reconciliation_due_date, datetime.date(2024, 5, 21))
+        self.assertFalse(reconciliation.prepared_within_required_period)
+        self.assertEqual(reconciliation.working_days_late, 2)

@@ -271,6 +271,11 @@ def calculate_ledger_balances_as_at(trust_account, as_at):
 
 
 def trial_balance_pdf_bytes(trust_account, as_at):
+    reconciliation = MonthlyReconciliation.objects.filter(
+        trust_account=trust_account,
+        period_end=as_at,
+        is_finalised=True,
+    ).order_by('-finalised_on').first()
     ledgers = (
         MatterLedger.objects
         .filter(trust_account=trust_account)
@@ -288,6 +293,13 @@ def trial_balance_pdf_bytes(trust_account, as_at):
         rows.append([str(ledger.matter), str(balance)])
         total += balance
     rows.append(['TOTAL', str(total)])
+    if reconciliation:
+        rows.extend([
+            ['Date statement prepared', str(reconciliation.date_statement_prepared or '')],
+            ['Reconciliation due date', str(reconciliation.reconciliation_due_date)],
+            ['Prepared within required period', 'Yes' if reconciliation.prepared_within_required_period else 'No'],
+            ['Preparation status', reconciliation.preparation_status_label],
+        ])
 
     _build_pdf_document(buffer, trust_account, 'Trust Trial Balance',
                         f"As at {as_at}", rows, col_headers)
@@ -316,6 +328,10 @@ def reconciliation_statement_pdf_bytes(reconciliation):
         ['Finalised?', 'Yes' if getattr(reconciliation, 'is_finalised', False) else 'No'],
         ['Finalised By', str(reconciliation.finalised_by) if getattr(reconciliation, 'finalised_by_id', None) else ''],
         ['Finalised On', str(reconciliation.finalised_on) if getattr(reconciliation, 'finalised_on', None) else ''],
+        ['Date statement prepared', str(reconciliation.date_statement_prepared or '')],
+        ['Reconciliation due date', str(reconciliation.reconciliation_due_date)],
+        ['Prepared within required period', 'Yes' if reconciliation.prepared_within_required_period else 'No' if reconciliation.finalised_on else ''],
+        ['Preparation status', reconciliation.preparation_status_label],
         ['Period Status', reconciliation.accounting_period.get_status_display() if getattr(reconciliation, 'accounting_period_id', None) else ''],
     ]
     _build_pdf_document(buffer, trust_account, 'Monthly Trust Reconciliation',
