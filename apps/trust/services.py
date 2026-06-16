@@ -133,11 +133,22 @@ def can_finalise_reconciliation(reconciliation):
 
 def finalise_reconciliation(reconciliation, user):
     with transaction.atomic():
-        recon = MonthlyReconciliation.objects.select_for_update().select_related('accounting_period').get(pk=reconciliation.pk)
+        # PostgreSQL rejects SELECT FOR UPDATE on the nullable side of the
+        # outer join produced by select_related('accounting_period'), so lock
+        # the reconciliation row first and lock/create the period separately.
+        recon = MonthlyReconciliation.objects.select_for_update().get(pk=reconciliation.pk)
+        if recon.accounting_period_id:
+            period = TrustAccountingPeriod.objects.select_for_update().get(pk=recon.accounting_period_id)
+            recon.accounting_period = period
+        else:
+            period = get_or_create_accounting_period(recon.trust_account, recon.period_end)
+            period = TrustAccountingPeriod.objects.select_for_update().get(pk=period.pk)
+            recon.accounting_period = period
+            recon.save(update_fields=['accounting_period'])
+
         can_finalise, reasons = can_finalise_reconciliation(recon)
         if not can_finalise:
             raise ValidationError(' '.join(reasons))
-        period = TrustAccountingPeriod.objects.select_for_update().get(pk=recon.accounting_period_id)
         if period.status == TrustAccountingPeriod.STATUS_LOCKED:
             raise ValidationError('Accounting period is locked.')
         now = timezone.now()
