@@ -245,18 +245,6 @@ class Payment(models.Model):
     def __str__(self):
         return f"Payment #{self.payment_number} \u2013 {self.payee_name} ${self.transaction.amount}"
 
-    def clean(self):
-        # NSW Rule 43 requires trust money withdrawals by EFT to be authorised
-        # by an authorised principal/associate. It does not mandate a second
-        # authoriser, so dual authorisation remains optional firm policy rather
-        # than a model-level compliance requirement.
-        if self.second_authoriser_id and self.second_authoriser_id == self.authorised_by_id:
-            raise ValidationError({
-                'second_authoriser': 'Second authoriser must be different from the primary authoriser.'
-            })
-        return super().clean()
-
-
 class TrustJournal(models.Model):
     from_ledger = models.ForeignKey(MatterLedger, on_delete=models.PROTECT, related_name='journals_out')
     to_ledger = models.ForeignKey(MatterLedger, on_delete=models.PROTECT, related_name='journals_in')
