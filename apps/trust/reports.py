@@ -424,7 +424,6 @@ def receipt_pdf(receipt):
         ['Receipt Number', str(receipt.receipt_number)],
         ['Date receipt made out', str(receipt.date_made_out or '')],
         ['Date received / confirmed in trust account', str(receipt.transaction.date_received_or_paid)],
-        ['Date deposited to trust account', str(receipt.transaction.date_banked or '')],
         ['Payor', receipt.payor_name],
         ['Payment Method', receipt.get_payment_method_display()],
         ['Cheque Number', receipt.cheque_number],
@@ -433,6 +432,8 @@ def receipt_pdf(receipt):
         ['Matter', str(receipt.transaction.matter_ledger.matter)],
         ['Deposit delay — review if not deposited as soon as practicable', 'Yes' if receipt.late_banking else 'No'],
     ]
+    if receipt.uses_separate_deposit_date:
+        details.insert(3, ['Date deposited to trust account', str(receipt.transaction.date_banked or '')])
     t = Table(details)
     t.setStyle(TableStyle([
         ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
