@@ -4,7 +4,8 @@ from .models import (
     TrustAccount, ControlledMoneyAccount, MatterLedger, TrustTransaction,
     Receipt, Payment, TrustJournal, WrittenDirection, TransitMoneyEntry,
     PowerMoneyEntry, MonthlyReconciliation, Irregularity, TrustAccountingPeriod,
-    TrustMonthlyRecord,
+    TrustMonthlyRecord, ControlledMoneyReceipt, ControlledMoneyWithdrawal,
+    ControlledMoneySupportingDocument, ControlledMoneyMonthlyStatement,
 )
 from .services import create_receipt, create_payment
 
@@ -18,9 +19,9 @@ class TrustAccountAdmin(admin.ModelAdmin):
 
 @admin.register(ControlledMoneyAccount)
 class ControlledMoneyAccountAdmin(admin.ModelAdmin):
-    list_display = ['client', 'firm', 'bank', 'bsb', 'account_number', 'opened_on']
-    list_filter = ['firm']
-    search_fields = ['client__name', 'account_number']
+    list_display = ['account_name', 'client', 'firm', 'bank', 'bsb', 'account_number', 'current_balance', 'is_active', 'opened_on']
+    list_filter = ['firm', 'is_active']
+    search_fields = ['account_name', 'client__name', 'account_number', 'matter_reference']
 
 
 @admin.register(MatterLedger)
@@ -59,6 +60,32 @@ class _ReadOnlyAppendMixin:
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(ControlledMoneyReceipt)
+class ControlledMoneyReceiptAdmin(_ReadOnlyAppendMixin, admin.ModelAdmin):
+    list_display = ['receipt_number', 'firm', 'controlled_money_account', 'date_made_out', 'amount', 'person_on_behalf', 'is_cancelled']
+    list_filter = ['firm', 'is_cancelled', 'not_delivered']
+    search_fields = ['receipt_number', 'person_from_whom_received', 'person_on_behalf', 'matter_reference', 'reason']
+
+
+@admin.register(ControlledMoneyWithdrawal)
+class ControlledMoneyWithdrawalAdmin(admin.ModelAdmin):
+    list_display = ['transaction_number', 'controlled_money_account', 'date', 'amount', 'withdrawal_method', 'person_on_behalf']
+    list_filter = ['withdrawal_method', 'controlled_money_account__firm']
+    search_fields = ['transaction_number', 'payee', 'destination_account_name', 'matter_reference', 'reason']
+
+
+@admin.register(ControlledMoneySupportingDocument)
+class ControlledMoneySupportingDocumentAdmin(admin.ModelAdmin):
+    list_display = ['controlled_money_account', 'document_type', 'description', 'uploaded_at']
+    list_filter = ['document_type', 'controlled_money_account__firm']
+
+
+@admin.register(ControlledMoneyMonthlyStatement)
+class ControlledMoneyMonthlyStatementAdmin(admin.ModelAdmin):
+    list_display = ['firm', 'period_end', 'prepared_on', 'due_date', 'reviewed_by', 'reviewed_on']
+    list_filter = ['firm']
 
 
 @admin.register(Receipt)

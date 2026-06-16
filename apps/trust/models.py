@@ -33,6 +33,7 @@ class TrustAccount(models.Model):
     is_active = models.BooleanField(default=True)
     next_receipt_number = models.PositiveIntegerField(default=1)
     next_payment_number = models.PositiveIntegerField(default=1)
+    next_controlled_money_receipt_number = models.PositiveIntegerField(default=1)
 
     class Meta:
         verbose_name = 'Trust Account'
@@ -46,11 +47,19 @@ class ControlledMoneyAccount(models.Model):
     firm = models.ForeignKey('firms.Firm', on_delete=models.PROTECT, related_name='controlled_money_accounts')
     client = models.ForeignKey('clients.Client', on_delete=models.PROTECT, related_name='controlled_money_accounts')
     matter = models.ForeignKey('matters.Matter', on_delete=models.PROTECT, null=True, blank=True, related_name='controlled_money_accounts')
+    account_name = models.CharField(max_length=255, blank=True, default='')
     bank = models.CharField(max_length=255)
     bsb = models.CharField(max_length=7, validators=[RegexValidator(r'^\d{3}-\d{3}$', 'BSB must be in format 000-000')])
     account_number = models.CharField(max_length=20)
-    client_instruction_document = models.FileField(upload_to='controlled_money/instructions/')
-    interest_disposition = models.TextField()
+    client_instruction_document = models.FileField(upload_to='controlled_money/instructions/', null=True, blank=True)
+    interest_disposition = models.TextField(blank=True, default='')
+    purpose = models.TextField(blank=True, default='')
+    person_on_behalf = models.CharField(max_length=255, blank=True, default='')
+    person_address = models.TextField(blank=True, default='')
+    matter_reference = models.CharField(max_length=100, blank=True, default='')
+    matter_description = models.CharField(max_length=500, blank=True, default='')
+    current_balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    is_active = models.BooleanField(default=True)
     opened_on = models.DateField(default=datetime.date.today)
     closed_on = models.DateField(null=True, blank=True)
 
@@ -60,6 +69,147 @@ class ControlledMoneyAccount(models.Model):
 
     def __str__(self):
         return f"Controlled Money \u2013 {self.client} ({self.bsb} {self.account_number})"
+
+    def clean(self):
+        errors = {}
+        name = (self.account_name or '').lower()
+        firm_name = (self.firm.name if self.firm_id else '').lower()
+        if firm_name and firm_name not in name:
+            errors['account_name'] = 'Controlled money account name must include the law practice/firm name.'
+        if not any(term in name for term in ['controlled money account', 'cma', 'cma/c']):
+            errors['account_name'] = 'Controlled money account name must include "controlled money account", "CMA", or "CMA/c".'
+        if len((self.purpose or '').strip()) < 5 and len((self.matter_description or '').strip()) < 5:
+            errors['purpose'] = 'Account name/purpose details must distinguish this CMA from other controlled money accounts.'
+        if self.current_balance is not None and self.current_balance < 0:
+            errors['current_balance'] = 'Controlled money account balance cannot be negative.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if not self.person_on_behalf and self.client_id:
+            self.person_on_behalf = self.client.name
+        if not self.person_address and self.client_id:
+            self.person_address = self.client.address
+        if self.matter_id:
+            self.matter_reference = self.matter_reference or self.matter.file_number
+            self.matter_description = self.matter_description or self.matter.description
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+
+class ControlledMoneyReceipt(models.Model):
+    PAYMENT_METHOD_CHOICES = [('cash', 'Cash'), ('cheque', 'Cheque'), ('eft', 'EFT'), ('direct_deposit', 'Direct Deposit')]
+    firm = models.ForeignKey('firms.Firm', on_delete=models.PROTECT, related_name='controlled_money_receipts')
+    controlled_money_account = models.ForeignKey(ControlledMoneyAccount, on_delete=models.PROTECT, null=True, blank=True, related_name='receipts')
+    receipt_number = models.PositiveIntegerField()
+    date_made_out = models.DateField(default=timezone.localdate)
+    date_money_received = models.DateField(null=True, blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
+    person_from_whom_received = models.CharField(max_length=255)
+    person_on_behalf = models.CharField(max_length=255)
+    matter_description = models.CharField(max_length=500)
+    matter_reference = models.CharField(max_length=100, blank=True)
+    reason = models.CharField(max_length=500)
+    made_out_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='controlled_money_receipts_made')
+    is_cancelled = models.BooleanField(default=False)
+    not_delivered = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['receipt_number']
+        constraints = [models.UniqueConstraint(fields=['firm', 'receipt_number'], name='unique_cma_receipt_number_per_firm')]
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            raise PermissionError('Controlled money receipts are immutable; preserve cancelled/not delivered receipts.')
+        if not self.receipt_number:
+            from django.db import transaction
+            with transaction.atomic():
+                account = TrustAccount.objects.select_for_update().filter(firm=self.firm).order_by('pk').first()
+                if account:
+                    self.receipt_number = account.next_controlled_money_receipt_number
+                    account.next_controlled_money_receipt_number += 1
+                    account.save(update_fields=['next_controlled_money_receipt_number'])
+        self.full_clean()
+        super().save(*args, **kwargs)
+        if self.controlled_money_account_id and not self.is_cancelled:
+            ControlledMoneyAccount.objects.filter(pk=self.controlled_money_account_id).update(current_balance=models.F('current_balance') + self.amount)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError('Controlled money receipts cannot be deleted once issued.')
+
+
+class ControlledMoneyWithdrawal(models.Model):
+    METHOD_CHOICES = [('cheque', 'Cheque'), ('eft', 'EFT')]
+    controlled_money_account = models.ForeignKey(ControlledMoneyAccount, on_delete=models.PROTECT, related_name='withdrawals')
+    date = models.DateField()
+    transaction_number = models.CharField(max_length=100)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    withdrawal_method = models.CharField(max_length=10, choices=METHOD_CHOICES)
+    payee = models.CharField(max_length=255, blank=True)
+    destination_account_name = models.CharField(max_length=255, blank=True)
+    destination_account_number = models.CharField(max_length=20, blank=True)
+    destination_bsb = models.CharField(max_length=7, blank=True)
+    person_receiving_benefit = models.CharField(max_length=255, blank=True)
+    person_on_behalf = models.CharField(max_length=255)
+    matter_reference = models.CharField(max_length=100, blank=True)
+    reason = models.CharField(max_length=500)
+    authorised_by = models.CharField(max_length=500)
+    supporting_authority = models.FileField(upload_to='controlled_money/authorities/', null=True, blank=True)
+    included_in_monthly_statement = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def clean(self):
+        errors = {}
+        if self.withdrawal_method not in {'cheque', 'eft'}:
+            errors['withdrawal_method'] = 'Withdrawal method must be cheque or EFT.'
+        if self.withdrawal_method == 'cheque' and not (self.payee or (self.destination_bsb and self.person_receiving_benefit)):
+            errors['payee'] = 'Cheque withdrawals require a payee or ADI/BSB and person receiving benefit.'
+        if self.withdrawal_method == 'eft' and not (self.destination_account_name and self.destination_account_number and self.destination_bsb):
+            errors['destination_account_name'] = 'EFT withdrawals require destination account name, number and BSB.'
+        if self.controlled_money_account_id and self.amount and self.amount > self.controlled_money_account.current_balance:
+            errors['amount'] = 'Withdrawal cannot overdraw the controlled money account.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None:
+            old = type(self).objects.get(pk=self.pk)
+            if old.included_in_monthly_statement:
+                raise PermissionError('Controlled money withdrawals included in monthly statements cannot be changed.')
+        self.full_clean()
+        super().save(*args, **kwargs)
+        ControlledMoneyAccount.objects.filter(pk=self.controlled_money_account_id).update(current_balance=models.F('current_balance') - self.amount)
+
+
+class ControlledMoneySupportingDocument(models.Model):
+    DOCUMENT_TYPE_CHOICES = [('adi_statement', 'ADI statement'), ('interest_notification', 'Interest notification'), ('authority', 'Authority/direction'), ('other', 'Other')]
+    controlled_money_account = models.ForeignKey(ControlledMoneyAccount, on_delete=models.PROTECT, related_name='supporting_documents')
+    document_type = models.CharField(max_length=30, choices=DOCUMENT_TYPE_CHOICES)
+    document = models.FileField(upload_to='controlled_money/supporting/')
+    description = models.CharField(max_length=255, blank=True)
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+
+class ControlledMoneyMonthlyStatement(models.Model):
+    firm = models.ForeignKey('firms.Firm', on_delete=models.PROTECT, related_name='controlled_money_monthly_statements')
+    period_end = models.DateField()
+    prepared_on = models.DateField(default=timezone.localdate)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='controlled_money_statements_reviewed')
+    reviewed_on = models.DateField(null=True, blank=True)
+    reviewer_role_confirmation = models.CharField(max_length=255, blank=True)
+    review_note = models.TextField(blank=True)
+    pdf = models.FileField(upload_to='controlled_money/monthly-statements/', null=True, blank=True)
+    sha256_hash = models.CharField(max_length=64, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['firm', 'period_end'], name='unique_cma_monthly_statement_per_firm')]
+
+    @property
+    def due_date(self):
+        return add_nsw_working_days(self.period_end, 15)
 
 
 class MatterLedger(models.Model):

@@ -704,6 +704,29 @@ class ExaminerPackZipView(AdminOrAccountantMixin, View):
         return trust_reports.external_examiner_pack_zip(account, year)
 
 
+class TrustRecordsExportPackZipView(AdminOrAccountantMixin, View):
+    def get(self, request, pk):
+        account = get_object_or_404(
+            scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
+            pk=pk,
+        )
+        date_from = parse_date(request.GET.get('date_from') or '') if request.GET.get('date_from') else None
+        date_to = parse_date(request.GET.get('date_to') or '') if request.GET.get('date_to') else None
+        year = None
+        if request.GET.get('year'):
+            try:
+                year = int(request.GET['year'])
+            except ValueError:
+                return HttpResponseBadRequest('Invalid year.')
+        return trust_reports.trust_records_export_pack_zip(
+            account,
+            date_from=date_from,
+            date_to=date_to,
+            year=year,
+            all_data=request.GET.get('all') in {'1', 'true', 'yes'},
+        )
+
+
 class LedgerStatementPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
         ledger = get_object_or_404(
@@ -711,6 +734,20 @@ class LedgerStatementPDFView(StaffRequiredMixin, View):
             pk=pk,
         )
         return trust_reports.matter_ledger_statement_pdf(ledger)
+
+
+class TrustAccountStatementPDFView(StaffRequiredMixin, View):
+    def get(self, request, pk):
+        ledger = get_object_or_404(
+            scope_trust_queryset_for_user(
+                MatterLedger.objects.select_related('trust_account__firm', 'matter__client'),
+                request.user,
+            ),
+            pk=pk,
+        )
+        date_from = parse_date(request.GET.get('date_from') or '') if request.GET.get('date_from') else None
+        date_to = parse_date(request.GET.get('date_to') or '') if request.GET.get('date_to') else None
+        return trust_reports.trust_account_statement_pdf(ledger, date_from, date_to)
 
 
 class ReconciliationPDFView(StaffRequiredMixin, View):
