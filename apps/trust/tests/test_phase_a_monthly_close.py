@@ -741,11 +741,42 @@ class Rule48LedgerReconciliationReportTestCase(PhaseAMonthlyCloseTestCase):
         from unittest.mock import patch
         self.client.login(username='phase_admin', password='pass')
         with patch('apps.trust.views.timezone.localdate', return_value=datetime.date(2026, 6, 16)):
-            response = self.client.get(
-                reverse('trust:trial_balance_pdf', kwargs={'pk': self.trust_account.pk}),
-                {'as_at': '2026-06-17'},
-            )
+            with patch('apps.trust.reports.trust_trial_balance_pdf', return_value=HttpResponse(content_type='application/pdf')) as mocked:
+                response = self.client.get(
+                    reverse('trust:trial_balance_pdf', kwargs={'pk': self.trust_account.pk}),
+                    {'as_at': '2026-06-17'},
+                )
         self.assertEqual(response.status_code, 400)
+        self.assertContains(response, 'Trust Reports', status_code=400)
+        self.assertContains(response, 'As at date cannot be in the future.', status_code=400)
+        self.assertContains(response, 'value="2026-06-17"', status_code=400)
+        self.assertNotEqual(response.get('Content-Type'), 'application/pdf')
+        mocked.assert_not_called()
+
+    def test_trial_balance_pdf_view_blocks_manually_supplied_future_as_at_url(self):
+        from unittest.mock import patch
+        self.client.login(username='phase_admin', password='pass')
+        url = f"{reverse('trust:trial_balance_pdf', kwargs={'pk': self.trust_account.pk})}?as_at=2026-06-17"
+        with patch('apps.trust.views.timezone.localdate', return_value=datetime.date(2026, 6, 16)):
+            with patch('apps.trust.reports.trust_trial_balance_pdf', return_value=HttpResponse(content_type='application/pdf')) as mocked:
+                response = self.client.get(url)
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, 'As at date cannot be in the future.', status_code=400)
+        self.assertNotEqual(response.get('Content-Type'), 'application/pdf')
+        mocked.assert_not_called()
+
+    def test_trial_balance_pdf_view_downloads_pdf_for_historical_as_at_date(self):
+        from unittest.mock import patch
+        self.client.login(username='phase_admin', password='pass')
+        with patch('apps.trust.views.timezone.localdate', return_value=datetime.date(2026, 6, 16)):
+            with patch('apps.trust.reports.trust_trial_balance_pdf', return_value=HttpResponse(b'%PDF-1.4', content_type='application/pdf')) as mocked:
+                response = self.client.get(
+                    reverse('trust:trial_balance_pdf', kwargs={'pk': self.trust_account.pk}),
+                    {'as_at': '2026-05-31'},
+                )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get('Content-Type'), 'application/pdf')
+        mocked.assert_called_once_with(self.trust_account, datetime.date(2026, 5, 31))
 
     def test_ledger_reconciliation_as_at_date_and_cutoff_balances(self):
         from unittest.mock import patch

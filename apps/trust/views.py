@@ -590,18 +590,31 @@ class IrregularityDetailView(StaffRequiredMixin, View):
             return redirect(reverse('trust:irregularity_list'))
         return render(request, self.template_name, {'irregularity': irr, 'form': form, 'can_resolve': can_resolve})
 
+def build_reports_context(request, trial_balance_account_id=None, trial_balance_as_at='', trial_balance_error=''):
+    accounts = list(scope_trust_queryset_for_user(
+        TrustAccount.objects.filter(is_active=True),
+        request.user,
+        firm_lookup='firm',
+    ))
+    for account in accounts:
+        account.trial_balance_as_at_value = ''
+        account.trial_balance_error = ''
+        if account.pk == trial_balance_account_id:
+            account.trial_balance_as_at_value = trial_balance_as_at
+            account.trial_balance_error = trial_balance_error
+    return {
+        'accounts': accounts,
+        'date_form': DateRangeForm(),
+        'year_form': YearForm(),
+    }
+
+
 class ReportsLandingView(StaffRequiredMixin, TemplateView):
     template_name = 'trust/reports.html'
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx['accounts'] = scope_trust_queryset_for_user(
-            TrustAccount.objects.filter(is_active=True),
-            self.request.user,
-            firm_lookup='firm',
-        )
-        ctx['date_form'] = DateRangeForm()
-        ctx['year_form'] = YearForm()
+        ctx.update(build_reports_context(self.request))
         return ctx
 
 
@@ -667,7 +680,13 @@ class TrialBalancePDFView(StaffRequiredMixin, View):
         else:
             as_at = timezone.localdate()
         if as_at > timezone.localdate():
-            return HttpResponseBadRequest('as_at date cannot be in the future.')
+            context = build_reports_context(
+                request,
+                trial_balance_account_id=account.pk,
+                trial_balance_as_at=as_at_param or as_at.isoformat(),
+                trial_balance_error='As at date cannot be in the future.',
+            )
+            return render(request, 'trust/reports.html', context, status=400)
         return trust_reports.trust_trial_balance_pdf(account, as_at)
 
 
