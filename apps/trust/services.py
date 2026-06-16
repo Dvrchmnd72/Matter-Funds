@@ -118,6 +118,36 @@ def generate_monthly_records_for_reconciliation(reconciliation, user):
     return records
 
 
+def calculate_historical_ledger_total(trust_account, as_at):
+    from . import reports as trust_reports
+
+    balances = trust_reports.calculate_ledger_balances_as_at(trust_account, as_at)
+    return _quantize(sum(balances.values(), Decimal('0.00')))
+
+
+def reconciliation_historical_balance_errors(reconciliation):
+    historical_total = calculate_historical_ledger_total(
+        reconciliation.trust_account,
+        reconciliation.period_end,
+    )
+    errors = []
+    if _quantize(reconciliation.ledger_total_balance) != historical_total:
+        errors.append(
+            'Ledger total balance does not match the transaction-derived trial balance '
+            f'as at {reconciliation.period_end}. '
+            f'Entered ledger total: {reconciliation.ledger_total_balance}; '
+            f'historical trial balance total: {historical_total}.'
+        )
+    if _quantize(reconciliation.cash_book_balance) != historical_total:
+        errors.append(
+            'Cash book balance does not match the transaction-derived cash book total '
+            f'as at {reconciliation.period_end}. '
+            f'Entered cash book balance: {reconciliation.cash_book_balance}; '
+            f'historical cash book total: {historical_total}.'
+        )
+    return errors
+
+
 def can_finalise_reconciliation(reconciliation):
     reasons = []
     if reconciliation.is_finalised:
@@ -128,6 +158,7 @@ def can_finalise_reconciliation(reconciliation):
         reasons.append('Reconciliation is not linked to an accounting period.')
     elif reconciliation.accounting_period.status == TrustAccountingPeriod.STATUS_LOCKED:
         reasons.append('Accounting period is locked.')
+    reasons.extend(reconciliation_historical_balance_errors(reconciliation))
     return not reasons, reasons
 
 
