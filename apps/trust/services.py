@@ -232,6 +232,8 @@ def lock_accounting_period(period, user):
 def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
                    payor_name, payment_method, cheque_number='', purpose, created_by):
     amount = _quantize(amount)
+    if payment_method in {'eft', 'direct_deposit'} and date_banked is None:
+        date_banked = date_received
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
         trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)

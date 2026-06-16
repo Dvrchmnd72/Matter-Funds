@@ -66,6 +66,57 @@ class TrustViewTestCase(TestCase):
         response = self.tc.get(url)
         self.assertIn(response.status_code, [403, 302])
 
+    def test_receipt_create_page_displays_system_made_out_date(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        url = reverse('trust:receipt_create', kwargs={'ledger_pk': self.ledger.pk})
+        response = self.tc.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Date receipt made out')
+        self.assertContains(response, 'readonly')
+        self.assertContains(response, 'Automatically recorded when this receipt is saved.')
+        self.assertContains(response, str(datetime.date.today()))
+        self.assertContains(response, 'Date received / confirmed in trust account')
+
+    def test_eft_receipt_create_defaults_deposit_date_to_received_date(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        url = reverse('trust:receipt_create', kwargs={'ledger_pk': self.ledger.pk})
+        received = datetime.date(2024, 1, 10)
+        response = self.tc.post(url, {
+            'amount': '500.00',
+            'date_received': str(received),
+            'date_banked': '',
+            'payor_name': 'Test Payor',
+            'payment_method': 'eft',
+            'cheque_number': '',
+            'purpose': 'Test receipt',
+        })
+
+        self.assertEqual(response.status_code, 302)
+        receipt = Receipt.objects.get(transaction__matter_ledger=self.ledger)
+        self.assertEqual(receipt.transaction.date_received_or_paid, received)
+        self.assertEqual(receipt.transaction.date_banked, received)
+
+    def test_cash_receipt_create_can_record_separate_deposit_date(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        url = reverse('trust:receipt_create', kwargs={'ledger_pk': self.ledger.pk})
+        received = datetime.date(2024, 1, 10)
+        deposited = datetime.date(2024, 1, 11)
+        response = self.tc.post(url, {
+            'amount': '500.00',
+            'date_received': str(received),
+            'date_banked': str(deposited),
+            'payor_name': 'Test Payor',
+            'payment_method': 'cash',
+            'cheque_number': '',
+            'purpose': 'Test receipt',
+        })
+
+        self.assertEqual(response.status_code, 302)
+        receipt = Receipt.objects.get(transaction__matter_ledger=self.ledger)
+        self.assertEqual(receipt.transaction.date_received_or_paid, received)
+        self.assertEqual(receipt.transaction.date_banked, deposited)
+
     def test_receipt_create_updates_balance(self):
         self.tc.login(username='admin_view', password='testpass123')
         url = reverse('trust:receipt_create', kwargs={'ledger_pk': self.ledger.pk})
@@ -82,7 +133,8 @@ class TrustViewTestCase(TestCase):
         self.assertIn(response.status_code, [302, 200])
         self.ledger.refresh_from_db()
         self.assertEqual(self.ledger.balance, Decimal('500.00'))
-        self.assertEqual(Receipt.objects.filter(transaction__matter_ledger=self.ledger).count(), 1)
+        receipt = Receipt.objects.get(transaction__matter_ledger=self.ledger)
+        self.assertEqual(receipt.transaction.date_banked, receipt.transaction.date_received_or_paid)
 
     def test_dashboard_accessible_after_login(self):
         self.tc.login(username='admin_view', password='testpass123')

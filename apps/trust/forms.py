@@ -8,9 +8,18 @@ from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, 
 
 class ReceiptForm(forms.Form):
     amount = forms.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
-    date_received = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}), initial=datetime.date.today)
+    date_received = forms.DateField(
+        label='Date received / confirmed in trust account',
+        help_text=(
+            'For EFT/direct deposit, use the date the solicitor received or accessed confirmation '
+            'that funds were in the trust account.'
+        ),
+        widget=forms.DateInput(attrs={'type': 'date'}),
+        initial=datetime.date.today,
+    )
     date_banked = forms.DateField(
         label='Date deposited to trust account',
+        help_text='Required for cash or cheque when the separate banking/deposit step occurs.',
         widget=forms.DateInput(attrs={'type': 'date'}),
         required=False,
     )

@@ -53,6 +53,7 @@ class TrustServiceTestCase(TestCase):
             payment_method='eft', purpose='Retainer', created_by=self.admin_user
         )
         self.assertFalse(receipt.late_banking)
+        self.assertEqual(receipt.transaction.date_banked, received)
 
     def test_receipt_late_deposit_uses_five_working_day_window(self):
         receipt = create_receipt(
@@ -87,7 +88,7 @@ class TrustServiceTestCase(TestCase):
             )
 
         self.assertIn('Date receipt made out', captured['headers'])
-        self.assertIn('Date received (if different)', captured['headers'])
+        self.assertIn('Date received / confirmed in trust account (if different)', captured['headers'])
         self.assertIn('Date deposited to trust account', captured['headers'])
         self.assertEqual(captured['rows'][0][0], '2024-01-10')
         self.assertEqual(captured['rows'][0][1], '2024-01-09')
@@ -123,7 +124,7 @@ class TrustServiceTestCase(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(['Date receipt made out', '2024-01-10'], captured['details'])
-        self.assertIn(['Date received', '2024-01-09'], captured['details'])
+        self.assertIn(['Date received / confirmed in trust account', '2024-01-09'], captured['details'])
         self.assertIn(['Date deposited to trust account', '2024-01-09'], captured['details'])
 
     def test_receipt_increments_balance(self):

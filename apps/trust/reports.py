@@ -101,7 +101,7 @@ def receipts_cash_book_pdf_bytes(trust_account, date_from, date_to):
 
     buffer = io.BytesIO()
     col_headers = [
-        'Date receipt made out', 'Date received (if different)',
+        'Date receipt made out', 'Date received / confirmed in trust account (if different)',
         'Date deposited to trust account', 'Receipt #', 'Matter', 'Payor', 'Method', 'Amount ($)'
     ]
     rows = []
@@ -415,7 +415,7 @@ def receipt_pdf(receipt):
     details = [
         ['Receipt Number', str(receipt.receipt_number)],
         ['Date receipt made out', str(receipt.date_made_out or '')],
-        ['Date received', str(receipt.transaction.date_received_or_paid)],
+        ['Date received / confirmed in trust account', str(receipt.transaction.date_received_or_paid)],
         ['Date deposited to trust account', str(receipt.transaction.date_banked or '')],
         ['Payor', receipt.payor_name],
         ['Payment Method', receipt.get_payment_method_display()],

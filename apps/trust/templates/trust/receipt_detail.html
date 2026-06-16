@@ -6,7 +6,7 @@
   <dt class="col-sm-3">Payor</dt><dd class="col-sm-9">{{ receipt.payor_name }}</dd>
   <dt class="col-sm-3">Amount</dt><dd class="col-sm-9">${{ receipt.transaction.amount }}</dd>
   <dt class="col-sm-3">Date receipt made out</dt><dd class="col-sm-9">{{ receipt.date_made_out }}</dd>
-  <dt class="col-sm-3">Date received</dt><dd class="col-sm-9">{{ receipt.transaction.date_received_or_paid }}</dd>
+  <dt class="col-sm-3">Date received / confirmed in trust account</dt><dd class="col-sm-9">{{ receipt.transaction.date_received_or_paid }}</dd>
   <dt class="col-sm-3">Date deposited to trust account</dt><dd class="col-sm-9">{{ receipt.transaction.date_banked|default:"–" }}</dd>
   <dt class="col-sm-3">Payment Method</dt><dd class="col-sm-9">{{ receipt.get_payment_method_display }}</dd>
   <dt class="col-sm-3">Purpose</dt><dd class="col-sm-9">{{ receipt.purpose }}</dd>
