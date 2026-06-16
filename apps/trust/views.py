@@ -1,11 +1,11 @@
 import datetime
-
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db.models import Q
 from django.http import FileResponse, Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy, reverse
+from django.utils import timezone
 from django.views import View
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, TemplateView, FormView
 
@@ -88,7 +88,7 @@ class ReceiptCreateView(StaffRequiredMixin, View):
         return {
             'form': form,
             'ledger': ledger,
-            'date_receipt_made_out': datetime.date.today(),
+            'date_receipt_made_out': timezone.localdate(),
         }
 
     def get(self, request, ledger_pk):

@@ -10,7 +10,7 @@
   <dt class="col-sm-3">Date deposited to trust account</dt><dd class="col-sm-9">{{ receipt.transaction.date_banked|default:"–" }}</dd>
   <dt class="col-sm-3">Payment Method</dt><dd class="col-sm-9">{{ receipt.get_payment_method_display }}</dd>
   <dt class="col-sm-3">Purpose</dt><dd class="col-sm-9">{{ receipt.purpose }}</dd>
-  <dt class="col-sm-3">Late Banking</dt><dd class="col-sm-9">{{ receipt.late_banking|yesno:"Yes,No" }}</dd>
+  <dt class="col-sm-3">Deposit delay — review if not deposited as soon as practicable</dt><dd class="col-sm-9">{{ receipt.late_banking|yesno:"Yes,No" }}</dd>
   <dt class="col-sm-3">Matter</dt><dd class="col-sm-9">{{ receipt.transaction.matter_ledger.matter }}</dd>
 </dl>
 <a href="{% url 'trust:receipt_pdf' receipt.pk %}" class="btn btn-primary">Download PDF</a>
