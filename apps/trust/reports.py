@@ -5,6 +5,7 @@ import datetime
 from decimal import Decimal
 
 from django.http import HttpResponse
+from django.utils import timezone
 
 try:
     from reportlab.lib.pagesizes import A4
@@ -285,23 +286,25 @@ def trial_balance_pdf_bytes(trust_account, as_at):
     balances = calculate_ledger_balances_as_at(trust_account, as_at)
 
     buffer = io.BytesIO()
-    col_headers = ['Matter', 'Balance ($)']
+    col_headers = ['Ledger name', 'Identifying reference', 'Matter description', 'Balance ($)']
     rows = []
     total = Decimal('0.00')
     for ledger in ledgers:
         balance = balances.get(ledger.pk, Decimal('0.00'))
-        rows.append([str(ledger.matter), str(balance)])
+        matter = ledger.matter
+        rows.append([str(matter), matter.file_number or str(ledger.pk), matter.description, str(balance)])
         total += balance
-    rows.append(['TOTAL', str(total)])
+    rows.append(['TOTAL', '', '', str(total)])
+    rows.append(['Date generated / prepared', '', '', str(timezone.localdate())])
     if reconciliation:
         rows.extend([
-            ['Date statement prepared', str(reconciliation.date_statement_prepared or '')],
-            ['Reconciliation due date', str(reconciliation.reconciliation_due_date)],
-            ['Prepared within required period', 'Yes' if reconciliation.prepared_within_required_period else 'No'],
-            ['Preparation status', reconciliation.preparation_status_label],
+            ['Date statement prepared', '', '', str(reconciliation.date_statement_prepared or '')],
+            ['Reconciliation due date', '', '', str(reconciliation.reconciliation_due_date)],
+            ['Prepared within required period', '', '', 'Yes' if reconciliation.prepared_within_required_period else 'No'],
+            ['Preparation status', '', '', reconciliation.preparation_status_label],
         ])
 
-    _build_pdf_document(buffer, trust_account, 'Trust Trial Balance',
+    _build_pdf_document(buffer, trust_account, 'Trust Trial Balance Statement / Ledger Reconciliation – Rule 48(2)(b)',
                         f"As at {as_at}", rows, col_headers)
     return buffer.getvalue()
 

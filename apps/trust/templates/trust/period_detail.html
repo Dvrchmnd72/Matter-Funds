@@ -16,7 +16,8 @@
 </dl>
 {% if period.reconciliation %}<p><a href="{% url 'trust:reconciliation_detail' period.reconciliation.pk %}" class="btn btn-outline-primary">View Reconciliation</a></p>{% endif %}
 <h2>Monthly Records</h2>
-<ul>{% for record in period.monthly_records.all %}<li><a href="{% url 'trust:monthly_record_detail' record.pk %}">{{ record.get_record_type_display }}</a> – {{ record.generated_at }}</li>{% empty %}<li>No monthly records generated.</li>{% endfor %}</ul>
+<p class="text-muted">Retained Rule 48 monthly records generated at reconciliation finalisation. These immutable stored PDFs are downloaded from the retained file and do not regenerate live reports.</p>
+<ul>{% for record in period.monthly_records.all %}<li><a href="{% url 'trust:monthly_record_detail' record.pk %}">{{ record.get_record_type_display }}</a> – {{ record.generated_at }} <a href="{% url 'trust:monthly_record_download' record.pk %}" class="btn btn-sm btn-outline-secondary ms-2">Download PDF</a></li>{% empty %}<li>No monthly records generated.</li>{% endfor %}</ul>
 {% if period.status == 'open' and period.reconciliation and period.reconciliation.is_finalised %}<a href="{% url 'trust:period_lock' period.pk %}" class="btn btn-danger">Lock Period</a>{% endif %}
 <a href="{% url 'trust:period_list' %}" class="btn btn-secondary">Back</a>
 {% endblock %}

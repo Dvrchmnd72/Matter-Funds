@@ -504,7 +504,7 @@ class TrustMonthlyRecord(models.Model):
         (RECORD_RECEIPTS_CASH_BOOK, 'Receipts Cash Book'),
         (RECORD_PAYMENTS_CASH_BOOK, 'Payments Cash Book'),
         (RECORD_TRUST_TRANSFER_JOURNAL, 'Trust Transfer Journal'),
-        (RECORD_TRIAL_BALANCE, 'Trial Balance'),
+        (RECORD_TRIAL_BALANCE, 'Ledger Reconciliation / Trial Balance'),
         (RECORD_RECONCILIATION_STATEMENT, 'Reconciliation Statement'),
     ]
 
