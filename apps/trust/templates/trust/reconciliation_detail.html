@@ -19,6 +19,9 @@
   <dt class="col-sm-4">Finalised</dt><dd class="col-sm-8">{{ reconciliation.is_finalised|yesno:"Yes,No" }}</dd>
   <dt class="col-sm-4">Finalised By</dt><dd class="col-sm-8">{{ reconciliation.finalised_by|default:"" }}</dd>
   <dt class="col-sm-4">Finalised On</dt><dd class="col-sm-8">{{ reconciliation.finalised_on|default:"" }}</dd>
+  <dt class="col-sm-4">Date statement prepared</dt><dd class="col-sm-8">{{ reconciliation.date_statement_prepared|default:"Not prepared" }}</dd>
+  <dt class="col-sm-4">Reconciliation due date</dt><dd class="col-sm-8">{{ reconciliation.reconciliation_due_date }}</dd>
+  <dt class="col-sm-4">Prepared within required period</dt><dd class="col-sm-8">{% if reconciliation.finalised_on %}{{ reconciliation.prepared_within_required_period|yesno:"Yes,No" }} – {{ reconciliation.preparation_status_label }}{% else %}Not prepared{% endif %}</dd>
   <dt class="col-sm-4">Bank statement evidence</dt>
   <dd class="col-sm-8">
     <span class="badge {% if reconciliation.bank_statement_pdf %}bg-success{% else %}bg-warning text-dark{% endif %}">

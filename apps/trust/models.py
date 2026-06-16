@@ -17,6 +17,32 @@ def _month_end_for(date_value):
     )
 
 
+def _is_month_end(date_value):
+    return date_value == _month_end_for(date_value)
+
+
+def _add_working_days(start_date, working_days):
+    current = start_date
+    added = 0
+    while added < working_days:
+        current += datetime.timedelta(days=1)
+        if current.weekday() < 5:
+            added += 1
+    return current
+
+
+def _working_days_after(start_date, end_date):
+    if not end_date or end_date <= start_date:
+        return 0
+    current = start_date
+    days = 0
+    while current < end_date:
+        current += datetime.timedelta(days=1)
+        if current.weekday() < 5:
+            days += 1
+    return days
+
+
 class TrustAccount(models.Model):
     firm = models.ForeignKey('firms.Firm', on_delete=models.PROTECT, related_name='trust_accounts')
     name = models.CharField(max_length=255)
@@ -375,6 +401,38 @@ class MonthlyReconciliation(models.Model):
     def __str__(self):
         return f"Reconciliation {self.period_end} \u2013 {self.trust_account}"
 
+    @property
+    def reconciliation_due_date(self):
+        return _add_working_days(self.period_end, 15)
+
+    @property
+    def date_statement_prepared(self):
+        if not self.finalised_on:
+            return None
+        return timezone.localdate(self.finalised_on)
+
+    @property
+    def prepared_within_required_period(self):
+        prepared_date = self.date_statement_prepared
+        if not prepared_date:
+            return None
+        return prepared_date <= self.reconciliation_due_date
+
+    @property
+    def working_days_late(self):
+        prepared_date = self.date_statement_prepared
+        if not prepared_date or prepared_date <= self.reconciliation_due_date:
+            return 0
+        return _working_days_after(self.reconciliation_due_date, prepared_date)
+
+    @property
+    def preparation_status_label(self):
+        if not self.finalised_on:
+            return 'Not prepared'
+        if self.prepared_within_required_period:
+            return 'On time'
+        return f'Late ({self.working_days_late} working days)'
+
     def save(self, *args, **kwargs):
         if self.pk is not None:
             old = type(self).objects.get(pk=self.pk)
@@ -388,6 +446,7 @@ class MonthlyReconciliation(models.Model):
         self.is_reconciled = (
             self.cash_book_balance == self.ledger_total_balance == self.reconciled_balance
         )
+        self.full_clean()
         super().save(*args, **kwargs)
         if not self.is_reconciled:
             discrepancy = self.cash_book_balance - self.reconciled_balance
@@ -406,12 +465,19 @@ class MonthlyReconciliation(models.Model):
 
     def clean(self):
         errors = {}
+        if self.period_end:
+            if not _is_month_end(self.period_end):
+                errors['period_end'] = 'Period end must be the last day of a month.'
+            if self.pk is None and not self.period_end < timezone.localdate():
+                errors['period_end'] = 'Reconciliation cannot be created until after the period end date.'
         if self.accounting_period_id:
             if self.accounting_period.trust_account_id != self.trust_account_id:
                 errors['accounting_period'] = 'Accounting period must belong to the same trust account.'
             if self.accounting_period.period_end != self.period_end:
                 errors['period_end'] = 'Period end must match the linked accounting period.'
         if self.is_finalised:
+            if self.period_end and not self.period_end < timezone.localdate():
+                errors['is_finalised'] = 'Reconciliation cannot be finalised until after the period end date.'
             if not self.is_reconciled:
                 errors['is_finalised'] = 'Only balanced reconciliations can be finalised.'
             if not self.finalised_by_id:

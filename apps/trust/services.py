@@ -176,6 +176,8 @@ def reconciliation_historical_balance_errors(reconciliation):
 
 def can_finalise_reconciliation(reconciliation):
     reasons = []
+    if reconciliation.period_end and not reconciliation.period_end < timezone.localdate():
+        reasons.append('Reconciliation cannot be finalised until after the period end date.')
     if reconciliation.is_finalised:
         reasons.append('Reconciliation is already finalised.')
     if not reconciliation.is_reconciled:
@@ -225,6 +227,8 @@ def lock_accounting_period(period, user):
         locked_period = TrustAccountingPeriod.objects.select_for_update().get(pk=period.pk)
         if locked_period.status == TrustAccountingPeriod.STATUS_LOCKED:
             raise ValidationError('Accounting period is already locked.')
+        if locked_period.period_end and not locked_period.period_end < timezone.localdate():
+            raise ValidationError('Accounting period cannot be locked until after the period end date.')
         reconciliation = getattr(locked_period, 'reconciliation', None)
         if not reconciliation or not reconciliation.is_finalised:
             raise ValidationError('Accounting period requires a finalised reconciliation before locking.')

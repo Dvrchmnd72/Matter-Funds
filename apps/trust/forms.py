@@ -196,8 +196,11 @@ class ReconciliationForm(forms.ModelForm):
     def clean_period_end(self):
         period_end = self.cleaned_data['period_end']
         import calendar
+        from django.utils import timezone
         if period_end.day != calendar.monthrange(period_end.year, period_end.month)[1]:
             raise forms.ValidationError('Period end must be the last day of a month.')
+        if not period_end < timezone.localdate():
+            raise forms.ValidationError('Reconciliation cannot be created until after the period end date.')
         return period_end
 
 

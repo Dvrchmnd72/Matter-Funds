@@ -8,6 +8,11 @@
   <dt class="col-sm-4">Status</dt><dd class="col-sm-8">{{ period.get_status_display }}</dd>
   <dt class="col-sm-4">Locked By</dt><dd class="col-sm-8">{{ period.locked_by|default:"" }}</dd>
   <dt class="col-sm-4">Locked On</dt><dd class="col-sm-8">{{ period.locked_on|default:"" }}</dd>
+  {% if period.reconciliation %}
+  <dt class="col-sm-4">Date statement prepared</dt><dd class="col-sm-8">{{ period.reconciliation.date_statement_prepared|default:"Not prepared" }}</dd>
+  <dt class="col-sm-4">Reconciliation due date</dt><dd class="col-sm-8">{{ period.reconciliation.reconciliation_due_date }}</dd>
+  <dt class="col-sm-4">Prepared within required period</dt><dd class="col-sm-8">{% if period.reconciliation.finalised_on %}{{ period.reconciliation.prepared_within_required_period|yesno:"Yes,No" }} – {{ period.reconciliation.preparation_status_label }}{% else %}Not prepared{% endif %}</dd>
+  {% endif %}
 </dl>
 {% if period.reconciliation %}<p><a href="{% url 'trust:reconciliation_detail' period.reconciliation.pk %}" class="btn btn-outline-primary">View Reconciliation</a></p>{% endif %}
 <h2>Monthly Records</h2>
