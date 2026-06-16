@@ -247,6 +247,29 @@ class PhaseAMonthlyCloseTestCase(TestCase):
         self.assertFalse(bool(finalised.bank_statement_pdf))
         self.assertEqual(finalised.monthly_records.count(), 5)
 
+    def test_finalisation_links_missing_accounting_period_without_bank_statement_pdf(self):
+        reconciliation = MonthlyReconciliation.objects.create(
+            trust_account=self.trust_account,
+            period_end=self.period_end,
+            cash_book_balance=Decimal('0.00'),
+            ledger_total_balance=Decimal('0.00'),
+            bank_statement_balance=Decimal('0.00'),
+            unpresented_cheques_total=Decimal('0.00'),
+            outstanding_deposits_total=Decimal('0.00'),
+        )
+        self.assertIsNone(reconciliation.accounting_period_id)
+
+        finalised = finalise_reconciliation(reconciliation, self.admin)
+        finalised.refresh_from_db()
+
+        self.assertTrue(finalised.is_finalised)
+        self.assertFalse(bool(finalised.bank_statement_pdf))
+        self.assertIsNotNone(finalised.accounting_period_id)
+        self.assertEqual(finalised.accounting_period.period_start, datetime.date(2024, 1, 1))
+        self.assertEqual(finalised.accounting_period.period_end, self.period_end)
+        self.assertEqual(finalised.accounting_period.trust_account, self.trust_account)
+        self.assertEqual(finalised.monthly_records.count(), 5)
+
     def test_finalised_reconciliation_without_bank_statement_shows_evidence_outstanding(self):
         reconciliation = self.create_balanced_reconciliation_without_bank_statement()
         finalise_reconciliation(reconciliation, self.admin)
