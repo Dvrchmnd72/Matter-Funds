@@ -5,7 +5,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from unittest.mock import patch
 
@@ -14,7 +14,7 @@ from apps.clients.models import Client
 from apps.matters.models import Matter
 from apps.trust.models import (
     TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment, TrustJournal,
-    MonthlyReconciliation, Irregularity,
+    MonthlyReconciliation, Irregularity, TrustAccountingPeriod,
 )
 from apps.trust.services import create_receipt, create_payment, create_transfer_to_office, create_trust_journal, reverse_transaction
 from apps.trust import reports as trust_reports
@@ -44,6 +44,111 @@ class TrustServiceTestCase(TestCase):
         self.ledger = MatterLedger.objects.create(
             matter=self.matter, trust_account=self.trust_account
         )
+
+    def _set_period_status(self, date_value, status):
+        period_start = date_value.replace(day=1)
+        if date_value.month == 12:
+            period_end = datetime.date(date_value.year, 12, 31)
+        else:
+            period_end = datetime.date(date_value.year, date_value.month + 1, 1) - datetime.timedelta(days=1)
+        period, _ = TrustAccountingPeriod.objects.get_or_create(
+            trust_account=self.trust_account,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        period.status = status
+        if status == TrustAccountingPeriod.STATUS_LOCKED:
+            period.locked_by = self.admin_user
+            period.locked_on = timezone.now()
+        else:
+            period.locked_by = None
+            period.locked_on = None
+        period.full_clean()
+        period.save()
+        return period
+
+    @override_settings(TIME_ZONE='Australia/Sydney')
+    def test_receipt_lock_check_uses_made_out_local_date_not_date_received(self):
+        self._set_period_status(datetime.date(2024, 5, 15), TrustAccountingPeriod.STATUS_LOCKED)
+        self._set_period_status(datetime.date(2024, 6, 15), TrustAccountingPeriod.STATUS_OPEN)
+        made_out_in_june = timezone.make_aware(
+            datetime.datetime(2024, 5, 31, 14, 30),
+            datetime.timezone.utc,
+        )
+
+        with patch.object(timezone, 'now', return_value=made_out_in_june):
+            receipt = create_receipt(
+                matter_ledger=self.ledger,
+                amount=Decimal('250.00'),
+                date_received=datetime.date(2024, 5, 31),
+                payor_name='Client A',
+                payment_method='direct_deposit',
+                purpose='Received in locked May, made out in open June',
+                created_by=self.admin_user,
+            )
+
+        receipt.refresh_from_db()
+        self.assertEqual(receipt.date_made_out, datetime.date(2024, 6, 1))
+        self.assertEqual(receipt.transaction.date_received_or_paid, datetime.date(2024, 5, 31))
+
+    @override_settings(TIME_ZONE='Australia/Sydney')
+    def test_receipt_lock_check_blocks_locked_made_out_period_even_if_received_period_open(self):
+        self._set_period_status(datetime.date(2024, 5, 15), TrustAccountingPeriod.STATUS_OPEN)
+        self._set_period_status(datetime.date(2024, 6, 15), TrustAccountingPeriod.STATUS_LOCKED)
+        made_out_in_june = timezone.make_aware(
+            datetime.datetime(2024, 6, 15, 1, 0),
+            datetime.timezone.utc,
+        )
+
+        with patch.object(timezone, 'now', return_value=made_out_in_june):
+            with self.assertRaises(ValidationError):
+                create_receipt(
+                    matter_ledger=self.ledger,
+                    amount=Decimal('250.00'),
+                    date_received=datetime.date(2024, 5, 31),
+                    payor_name='Client A',
+                    payment_method='direct_deposit',
+                    purpose='Received in open May, made out in locked June',
+                    created_by=self.admin_user,
+                )
+
+    @override_settings(TIME_ZONE='Australia/Sydney')
+    def test_receipts_cash_book_and_lock_check_use_same_made_out_local_date_basis(self):
+        self._set_period_status(datetime.date(2024, 5, 15), TrustAccountingPeriod.STATUS_LOCKED)
+        self._set_period_status(datetime.date(2024, 6, 15), TrustAccountingPeriod.STATUS_OPEN)
+        made_out_in_june = timezone.make_aware(
+            datetime.datetime(2024, 5, 31, 14, 30),
+            datetime.timezone.utc,
+        )
+        with patch.object(timezone, 'now', return_value=made_out_in_june):
+            receipt = create_receipt(
+                matter_ledger=self.ledger,
+                amount=Decimal('250.00'),
+                date_received=datetime.date(2024, 5, 31),
+                payor_name='Client A',
+                payment_method='direct_deposit',
+                purpose='Timezone boundary receipt',
+                created_by=self.admin_user,
+            )
+
+        captured = {}
+        def fake_build(buffer, trust_account, title, subtitle, rows, col_headers):
+            captured[subtitle] = rows
+            buffer.write(b'pdf')
+
+        with patch.object(trust_reports, '_build_pdf_document', side_effect=fake_build):
+            trust_reports.receipts_cash_book_pdf_bytes(
+                self.trust_account, datetime.date(2024, 5, 1), datetime.date(2024, 5, 31)
+            )
+            trust_reports.receipts_cash_book_pdf_bytes(
+                self.trust_account, datetime.date(2024, 6, 1), datetime.date(2024, 6, 30)
+            )
+
+        self.assertEqual(captured['2024-05-01 to 2024-05-31'], [])
+        self.assertEqual([row[5] for row in captured['2024-06-01 to 2024-06-30']], ['Client A'])
+        self.assertEqual(receipt.date_made_out, datetime.date(2024, 6, 1))
+        self.assertEqual(captured['2024-06-01 to 2024-06-30'][0][0], '2024-06-01')
+        self.assertEqual(captured['2024-06-01 to 2024-06-30'][0][1], '2024-05-31')
 
 
     def test_future_dated_receipt_is_blocked(self):
