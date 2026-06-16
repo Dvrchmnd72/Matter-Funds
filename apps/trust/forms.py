@@ -9,7 +9,11 @@ from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, 
 class ReceiptForm(forms.Form):
     amount = forms.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
     date_received = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}), initial=datetime.date.today)
-    date_banked = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}), required=False)
+    date_banked = forms.DateField(
+        label='Date deposited to trust account',
+        widget=forms.DateInput(attrs={'type': 'date'}),
+        required=False,
+    )
     payor_name = forms.CharField(max_length=255)
     payment_method = forms.ChoiceField(choices=[
         ('cash', 'Cash'), ('cheque', 'Cheque'), ('eft', 'EFT'), ('direct_deposit', 'Direct Deposit'),

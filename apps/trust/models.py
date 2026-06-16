@@ -201,11 +201,17 @@ class Receipt(models.Model):
     def __str__(self):
         return f"Receipt #{self.receipt_number} \u2013 {self.payor_name} ${self.transaction.amount}"
 
+    @property
+    def date_made_out(self):
+        """NSW receipt date made out, derived from the immutable creation timestamp."""
+        if not self.transaction_id or not self.transaction.created_at:
+            return None
+        return timezone.localdate(self.transaction.created_at)
+
     def clean(self):
-        if self.transaction_id and self.transaction.date_banked and self.transaction.date_received_or_paid:
-            delta = (self.transaction.date_banked - self.transaction.date_received_or_paid).days
-            if delta > 1:
-                self.late_banking = True
+        # Late banking is calculated in the receipt service against NSW timing rules.
+        # Do not apply a Queensland-style one-day assumption here.
+        return super().clean()
 
 
 class Payment(models.Model):

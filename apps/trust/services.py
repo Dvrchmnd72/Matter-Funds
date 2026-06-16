@@ -18,6 +18,23 @@ def _quantize(amount):
     return Decimal(amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN)
 
 
+def _add_working_days(start_date, working_days):
+    current = start_date
+    added = 0
+    while added < working_days:
+        current += datetime.timedelta(days=1)
+        if current.weekday() < 5:
+            added += 1
+    return current
+
+
+def _is_late_deposit(date_received, date_deposited):
+    """Return True when deposit occurs after NSW five-working-day recording window."""
+    if not date_received or not date_deposited:
+        return False
+    return date_deposited > _add_working_days(date_received, 5)
+
+
 def get_month_bounds(date_value):
     return (
         datetime.date(date_value.year, date_value.month, 1),
@@ -235,11 +252,7 @@ def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
         )
         txn.save()
 
-        late_banking = False
-        if date_banked and date_received:
-            delta = (date_banked - date_received).days
-            if delta > 1:
-                late_banking = True
+        late_banking = _is_late_deposit(date_received, date_banked)
 
         receipt = Receipt(
             transaction=txn,
