@@ -229,7 +229,7 @@ def matter_ledger_statement_pdf(matter_ledger):
             str(running),
         ])
 
-    _build_pdf_document(buffer, trust_account, f'Matter Ledger Statement \u2013 {matter_ledger.matter}',
+    _build_pdf_document(buffer, trust_account, 'Matter Ledger Statement',
                         f"As at {datetime.date.today()}", rows, col_headers)
     response = _make_pdf_response(f'ledger_statement_{matter_ledger.pk}.pdf')
     response.write(buffer.getvalue())

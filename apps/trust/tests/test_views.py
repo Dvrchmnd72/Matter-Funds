@@ -193,6 +193,62 @@ class TrustViewTestCase(TestCase):
         list_response = self.tc.get(reverse('trust:irregularity_list'))
         self.assertContains(list_response, 'Manual deficiency report')
 
+    def test_account_detail_shows_distinct_ledger_statement_actions(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        response = self.tc.get(reverse('trust:account_detail', kwargs={'pk': self.trust_account.pk}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Matter Ledger Statement')
+        self.assertContains(response, 'Trust Account Statement')
+        self.assertNotContains(response, 'Statement PDF')
+        self.assertContains(response, reverse('trust:ledger_statement_pdf', kwargs={'pk': self.ledger.pk}))
+        self.assertContains(response, reverse('trust:trust_account_statement_pdf', kwargs={'pk': self.ledger.pk}))
+
+    def test_trust_account_statement_pdf_uses_required_title_and_fields(self):
+        from apps.trust import reports as trust_reports
+        captured = []
+
+        class FakeDoc:
+            def __init__(self, *args, **kwargs):
+                pass
+            def build(self, elements):
+                captured.extend(elements)
+
+        class FakeTable:
+            def __init__(self, data, *args, **kwargs):
+                self.data = data
+            def setStyle(self, style):
+                pass
+            def __repr__(self):
+                return repr(self.data)
+
+        def fake_paragraph(text, style):
+            return text
+
+        with patch.object(trust_reports, 'SimpleDocTemplate', FakeDoc), \
+             patch.object(trust_reports, 'Paragraph', side_effect=fake_paragraph), \
+             patch.object(trust_reports, 'Spacer', side_effect=lambda *args, **kwargs: ''), \
+             patch.object(trust_reports, 'Table', FakeTable), \
+             patch.object(trust_reports, 'TableStyle', side_effect=lambda *args, **kwargs: None):
+            trust_reports.trust_account_statement_pdf_bytes(
+                self.ledger, datetime.date(2024, 1, 1), datetime.date(2024, 1, 31)
+            )
+
+        flattened = repr(captured)
+        self.assertIn('Trust Account Statement', flattened)
+        self.assertIn('Opening balance', flattened)
+        self.assertIn('Closing balance', flattened)
+        self.assertIn('Statement period: 2024-01-01 to 2024-01-31', flattened)
+        self.assertIn('Date statement prepared/generated', flattened)
+
+    def test_trust_account_statement_access_scoped_to_firm(self):
+        other_admin = User.objects.create_user(username='other_admin_view', password='testpass123', role='admin')
+        other_firm = Firm.objects.create(name='Other Firm', abn='12345678902', address='2 Other St', principal_solicitor=other_admin)
+        other_admin.firm = other_firm
+        other_admin.save()
+        self.tc.login(username='other_admin_view', password='testpass123')
+        response = self.tc.get(reverse('trust:trust_account_statement_pdf', kwargs={'pk': self.ledger.pk}))
+        self.assertEqual(response.status_code, 404)
+
     def test_transfer_costs_to_office_authorised_get(self):
         self.tc.login(username='admin_view', password='testpass123')
         response = self.tc.get(reverse('trust:transfer_costs_to_office_create', kwargs={'ledger_pk': self.ledger.pk}))
