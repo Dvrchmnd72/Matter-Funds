@@ -31,7 +31,9 @@ urlpatterns = [
     path('accounts/<int:pk>/reports/trust-transfer-journal/', views.TrustTransferJournalPDFView.as_view(), name='trust_transfer_journal_pdf'),
     path('accounts/<int:pk>/reports/trial-balance/', views.TrialBalancePDFView.as_view(), name='trial_balance_pdf'),
     path('accounts/<int:pk>/reports/examiner-pack/', views.ExaminerPackZipView.as_view(), name='examiner_pack'),
+    path('accounts/<int:pk>/reports/trust-records-export-pack/', views.TrustRecordsExportPackZipView.as_view(), name='trust_records_export_pack'),
     path('ledgers/<int:pk>/reports/statement/', views.LedgerStatementPDFView.as_view(), name='ledger_statement_pdf'),
+    path('ledgers/<int:pk>/reports/trust-account-statement/', views.TrustAccountStatementPDFView.as_view(), name='trust_account_statement_pdf'),
     path('reconciliations/<int:pk>/reports/pdf/', views.ReconciliationPDFView.as_view(), name='reconciliation_pdf'),
     path('receipts/<int:pk>/pdf/', views.ReceiptPDFView.as_view(), name='receipt_pdf'),
 ]
