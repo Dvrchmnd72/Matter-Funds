@@ -96,7 +96,7 @@ class TrustTransaction(models.Model):
     date_banked = models.DateField(null=True, blank=True)
     description = models.CharField(max_length=500)
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='trust_transactions')
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
     is_reversed = models.BooleanField(default=False)
     reverses = models.ForeignKey('self', null=True, blank=True, on_delete=models.PROTECT, related_name='reversed_by')
 
