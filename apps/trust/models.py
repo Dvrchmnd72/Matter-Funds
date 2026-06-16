@@ -218,6 +218,11 @@ class Receipt(models.Model):
         return f"Receipt #{self.receipt_number} \u2013 {self.payor_name} ${self.transaction.amount}"
 
     @property
+    def uses_separate_deposit_date(self):
+        """Cash and cheque receipts have a separate physical banking date."""
+        return self.payment_method in {'cash', 'cheque'}
+
+    @property
     def date_made_out(self):
         """NSW receipt date made out, derived from the immutable creation timestamp."""
         if not self.transaction_id or not self.transaction.created_at:
