@@ -8,6 +8,8 @@ from django.core.validators import MinValueValidator, RegexValidator
 from django.db import models
 from django.utils import timezone
 
+from .compliance_dates import add_nsw_working_days, nsw_working_days_after
+
 
 def _month_end_for(date_value):
     return datetime.date(
@@ -19,28 +21,6 @@ def _month_end_for(date_value):
 
 def _is_month_end(date_value):
     return date_value == _month_end_for(date_value)
-
-
-def _add_working_days(start_date, working_days):
-    current = start_date
-    added = 0
-    while added < working_days:
-        current += datetime.timedelta(days=1)
-        if current.weekday() < 5:
-            added += 1
-    return current
-
-
-def _working_days_after(start_date, end_date):
-    if not end_date or end_date <= start_date:
-        return 0
-    current = start_date
-    days = 0
-    while current < end_date:
-        current += datetime.timedelta(days=1)
-        if current.weekday() < 5:
-            days += 1
-    return days
 
 
 class TrustAccount(models.Model):
@@ -403,7 +383,7 @@ class MonthlyReconciliation(models.Model):
 
     @property
     def reconciliation_due_date(self):
-        return _add_working_days(self.period_end, 15)
+        return add_nsw_working_days(self.period_end, 15)
 
     @property
     def date_statement_prepared(self):
@@ -423,7 +403,7 @@ class MonthlyReconciliation(models.Model):
         prepared_date = self.date_statement_prepared
         if not prepared_date or prepared_date <= self.reconciliation_due_date:
             return 0
-        return _working_days_after(self.reconciliation_due_date, prepared_date)
+        return nsw_working_days_after(self.reconciliation_due_date, prepared_date)
 
     @property
     def preparation_status_label(self):

@@ -14,6 +14,12 @@ from apps.clients.models import Client
 from apps.firms.models import Firm
 from apps.matters.models import Matter
 from apps.trust import reports as trust_reports
+from apps.trust.compliance_dates import (
+    add_nsw_working_days,
+    is_nsw_public_or_bank_holiday,
+    is_nsw_working_day,
+    nsw_working_days_after,
+)
 from apps.trust.models import (
     MatterLedger,
     MonthlyReconciliation,
@@ -36,6 +42,34 @@ from apps.trust.services import (
 )
 
 User = get_user_model()
+
+
+class NSWComplianceDatesTestCase(TestCase):
+    def test_weekends_are_not_nsw_working_days(self):
+        self.assertFalse(is_nsw_working_day(datetime.date(2026, 6, 6)))
+        self.assertFalse(is_nsw_working_day(datetime.date(2026, 6, 7)))
+
+    def test_nsw_public_holidays_are_not_nsw_working_days(self):
+        self.assertTrue(is_nsw_public_or_bank_holiday(datetime.date(2026, 1, 26)))
+        self.assertFalse(is_nsw_working_day(datetime.date(2026, 1, 26)))
+
+    def test_good_friday_and_easter_monday_2026_are_not_nsw_working_days(self):
+        self.assertFalse(is_nsw_working_day(datetime.date(2026, 4, 3)))
+        self.assertFalse(is_nsw_working_day(datetime.date(2026, 4, 6)))
+
+    def test_kings_birthday_2026_is_not_nsw_working_day(self):
+        self.assertFalse(is_nsw_working_day(datetime.date(2026, 6, 8)))
+
+    def test_first_monday_in_august_bank_holiday_is_not_nsw_working_day(self):
+        self.assertTrue(is_nsw_public_or_bank_holiday(datetime.date(2026, 8, 3)))
+        self.assertFalse(is_nsw_working_day(datetime.date(2026, 8, 3)))
+
+    def test_add_nsw_working_days_excludes_public_and_bank_holidays(self):
+        self.assertEqual(add_nsw_working_days(datetime.date(2026, 5, 31), 15), datetime.date(2026, 6, 22))
+        self.assertEqual(add_nsw_working_days(datetime.date(2026, 3, 31), 15), datetime.date(2026, 4, 23))
+
+    def test_nsw_working_days_after_excludes_public_and_bank_holidays(self):
+        self.assertEqual(nsw_working_days_after(datetime.date(2026, 6, 19), datetime.date(2026, 6, 22)), 1)
 
 
 class PhaseAMonthlyCloseTestCase(TestCase):
@@ -695,19 +729,35 @@ class Rule48ReconciliationTimingTestCase(TestCase):
         labels = [row[0] for row in captured['rows']]
         self.assertIn('Date statement prepared', labels)
 
-    def test_finalisation_within_15_working_days_is_on_time(self):
+    def test_finalisation_within_15_nsw_working_days_is_on_time(self):
         reconciliation = self._balanced_reconciliation_for(datetime.date(2024, 4, 30))
         reconciliation.finalised_on = timezone.make_aware(datetime.datetime(2024, 5, 21, 10, 0))
         self.assertEqual(reconciliation.reconciliation_due_date, datetime.date(2024, 5, 21))
         self.assertTrue(reconciliation.prepared_within_required_period)
         self.assertEqual(reconciliation.working_days_late, 0)
 
-    def test_finalisation_after_15_working_days_is_late_but_allowed(self):
+    def test_finalisation_after_15_nsw_working_days_is_late_but_allowed(self):
         reconciliation = self._balanced_reconciliation_for(datetime.date(2024, 4, 30))
         reconciliation.finalised_on = timezone.make_aware(datetime.datetime(2024, 5, 23, 10, 0))
         self.assertEqual(reconciliation.reconciliation_due_date, datetime.date(2024, 5, 21))
         self.assertFalse(reconciliation.prepared_within_required_period)
         self.assertEqual(reconciliation.working_days_late, 2)
+
+    def test_may_2026_rule_48_due_date_excludes_kings_birthday(self):
+        reconciliation = self._balanced_reconciliation_for(datetime.date(2026, 5, 31))
+        reconciliation.finalised_on = timezone.make_aware(datetime.datetime(2026, 6, 16, 10, 0))
+        self.assertEqual(reconciliation.reconciliation_due_date, datetime.date(2026, 6, 22))
+        self.assertNotEqual(reconciliation.reconciliation_due_date, datetime.date(2026, 6, 19))
+        self.assertTrue(reconciliation.prepared_within_required_period)
+        self.assertEqual(reconciliation.working_days_late, 0)
+
+    def test_march_2026_rule_48_due_date_excludes_easter_holidays(self):
+        reconciliation = self._balanced_reconciliation_for(datetime.date(2026, 3, 31))
+        reconciliation.finalised_on = timezone.make_aware(datetime.datetime(2026, 4, 24, 10, 0))
+        self.assertEqual(reconciliation.reconciliation_due_date, datetime.date(2026, 4, 23))
+        self.assertNotEqual(reconciliation.reconciliation_due_date, datetime.date(2026, 4, 21))
+        self.assertFalse(reconciliation.prepared_within_required_period)
+        self.assertEqual(reconciliation.working_days_late, 1)
 
 class Rule48LedgerReconciliationReportTestCase(PhaseAMonthlyCloseTestCase):
     def test_reports_page_shows_separate_as_at_input(self):
