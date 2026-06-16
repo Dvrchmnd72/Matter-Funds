@@ -93,16 +93,16 @@ def receipts_cash_book_pdf_bytes(trust_account, date_from, date_to):
         .filter(
             transaction_type='receipt',
             matter_ledger__trust_account=trust_account,
-            date_received_or_paid__range=(date_from, date_to),
+            created_at__date__range=(date_from, date_to),
         )
         .select_related('matter_ledger__matter', 'receipt')
-        .order_by('date_received_or_paid', 'receipt__receipt_number')
+        .order_by('created_at', 'receipt__receipt_number', 'pk')
     )
 
     buffer = io.BytesIO()
     col_headers = [
         'Date receipt made out', 'Date received / confirmed in trust account (if different)',
-        'Date deposited to trust account', 'Receipt #', 'Matter', 'Payor', 'Method', 'Amount ($)'
+        'Date deposited to trust account', 'Receipt #', 'Matter', 'Payor', 'Method', 'Amount ($)', 'Reason', 'Ledger credited'
     ]
     rows = []
     for txn in transactions:
@@ -117,6 +117,8 @@ def receipts_cash_book_pdf_bytes(trust_account, date_from, date_to):
             r.payor_name if r else '',
             r.get_payment_method_display() if r else '',
             str(txn.amount),
+            r.purpose if r else txn.description,
+            str(txn.matter_ledger),
         ])
 
     _build_pdf_document(buffer, trust_account, 'Trust Receipts Cash Book',
@@ -258,6 +260,12 @@ def calculate_ledger_balances_as_at(trust_account, as_at):
         .order_by('date_received_or_paid', 'created_at', 'pk')
     )
     for txn in transactions:
+        if (
+            txn.transaction_type == 'reversal'
+            and txn.reverses_id
+            and txn.reverses.date_received_or_paid > as_at
+        ):
+            continue
         balances[txn.matter_ledger_id] = balances.get(txn.matter_ledger_id, Decimal('0.00')) + _transaction_delta(txn)
     return balances
 
@@ -423,7 +431,7 @@ def receipt_pdf(receipt):
         ['Purpose', receipt.purpose],
         ['Amount', f"${receipt.transaction.amount}"],
         ['Matter', str(receipt.transaction.matter_ledger.matter)],
-        ['Late Banking', 'Yes' if receipt.late_banking else 'No'],
+        ['Deposit delay — review if not deposited as soon as practicable', 'Yes' if receipt.late_banking else 'No'],
     ]
     t = Table(details)
     t.setStyle(TableStyle([

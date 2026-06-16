@@ -5,11 +5,13 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, Client as TestClient
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.firms.models import Firm
 from apps.clients.models import Client
 from apps.matters.models import Matter
 from apps.trust.models import TrustAccount, MatterLedger, Receipt, Payment, Irregularity
+from unittest.mock import patch
 
 User = get_user_model()
 
@@ -66,17 +68,38 @@ class TrustViewTestCase(TestCase):
         response = self.tc.get(url)
         self.assertIn(response.status_code, [403, 302])
 
-    def test_receipt_create_page_displays_system_made_out_date(self):
+    def test_receipt_create_page_displays_system_made_out_date_from_localdate(self):
         self.tc.login(username='admin_view', password='testpass123')
         url = reverse('trust:receipt_create', kwargs={'ledger_pk': self.ledger.pk})
-        response = self.tc.get(url)
+        local_date = datetime.date(2024, 2, 1)
+        with patch('apps.trust.views.timezone.localdate', return_value=local_date):
+            response = self.tc.get(url)
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'Date receipt made out')
         self.assertContains(response, 'readonly')
         self.assertContains(response, 'Automatically recorded when this receipt is saved.')
-        self.assertContains(response, str(datetime.date.today()))
+        self.assertContains(response, str(local_date))
+        self.assertEqual(response.context['date_receipt_made_out'], local_date)
         self.assertContains(response, 'Date received / confirmed in trust account')
+
+    def test_future_dated_receipt_create_is_rejected(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        url = reverse('trust:receipt_create', kwargs={'ledger_pk': self.ledger.pk})
+        future_date = timezone.localdate() + datetime.timedelta(days=1)
+        response = self.tc.post(url, {
+            'amount': '500.00',
+            'date_received': str(future_date),
+            'date_banked': '',
+            'payor_name': 'Test Payor',
+            'payment_method': 'eft',
+            'cheque_number': '',
+            'purpose': 'Test receipt',
+        })
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Receipt.objects.filter(transaction__matter_ledger=self.ledger).exists())
+        self.assertContains(response, 'cannot be future-dated')
 
     def test_eft_receipt_create_defaults_deposit_date_to_received_date(self):
         self.tc.login(username='admin_view', password='testpass123')

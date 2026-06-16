@@ -18,21 +18,20 @@ def _quantize(amount):
     return Decimal(amount).quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN)
 
 
-def _add_working_days(start_date, working_days):
-    current = start_date
-    added = 0
-    while added < working_days:
-        current += datetime.timedelta(days=1)
-        if current.weekday() < 5:
-            added += 1
-    return current
+def _validate_not_future(date_value, label):
+    if date_value and date_value > timezone.localdate():
+        raise ValidationError(f"{label} cannot be future-dated.")
 
 
-def _is_late_deposit(date_received, date_deposited):
-    """Return True when deposit occurs after NSW five-working-day recording window."""
+def _has_deposit_delay(date_received, date_deposited):
+    """Return True when banking/deposit occurred after receipt.
+
+    This is a review indicator only; the five-working-day recording deadline is
+    not a banking grace period.
+    """
     if not date_received or not date_deposited:
         return False
-    return date_deposited > _add_working_days(date_received, 5)
+    return date_deposited > date_received
 
 
 def get_month_bounds(date_value):
@@ -232,8 +231,13 @@ def lock_accounting_period(period, user):
 def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
                    payor_name, payment_method, cheque_number='', purpose, created_by):
     amount = _quantize(amount)
-    if payment_method in {'eft', 'direct_deposit'} and date_banked is None:
+    _validate_not_future(date_received, 'Trust receipt date received / confirmed')
+    if date_banked:
+        _validate_not_future(date_banked, 'Trust receipt date deposited')
+    if payment_method in {'eft', 'direct_deposit'}:
         date_banked = date_received
+    elif payment_method in {'cash', 'cheque'} and date_banked is None:
+        raise ValidationError('Date deposited to trust account is required for cash or cheque receipts.')
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
         trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
@@ -254,7 +258,7 @@ def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
         )
         txn.save()
 
-        late_banking = _is_late_deposit(date_received, date_banked)
+        late_banking = _has_deposit_delay(date_received, date_banked)
 
         receipt = Receipt(
             transaction=txn,
@@ -277,6 +281,7 @@ def create_payment(*, matter_ledger, amount, date_paid, payee_name, payee_bsb=''
                    payee_account='', payment_method, cheque_number='', purpose,
                    authorised_by, created_by):
     amount = _quantize(amount)
+    _validate_not_future(date_paid, 'Trust payment date paid')
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
         ensure_period_is_open(ledger.trust_account, date_paid)
@@ -350,6 +355,7 @@ def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, p
         reimbursement_evidence_file=reimbursement_evidence_file,
     )
     amount = _quantize(amount)
+    _validate_not_future(date_paid, 'Trust payment date paid')
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
         ensure_period_is_open(ledger.trust_account, date_paid)
@@ -414,7 +420,7 @@ def create_trust_journal(*, from_ledger, to_ledger, amount, description,
         if from_l.balance < amount:
             raise ValidationError(f"Insufficient funds in source ledger: balance {from_l.balance}, journal amount {amount}.")
 
-        today = datetime.date.today()
+        today = timezone.localdate()
         ensure_period_is_open(from_l.trust_account, today)
 
         txn_out = TrustTransaction(
@@ -466,7 +472,7 @@ def reverse_transaction(*, transaction_obj, reason, created_by):
             raise ValidationError("This transaction has already been reversed.")
 
         ledger = MatterLedger.objects.select_for_update().get(pk=transaction_obj.matter_ledger_id)
-        ensure_period_is_open(ledger.trust_account, datetime.date.today())
+        ensure_period_is_open(ledger.trust_account, timezone.localdate())
 
         txn_type = transaction_obj.transaction_type
         if txn_type in ('receipt', 'journal_in'):
@@ -482,7 +488,7 @@ def reverse_transaction(*, transaction_obj, reason, created_by):
             transaction_type='reversal',
             matter_ledger=ledger,
             amount=transaction_obj.amount,
-            date_received_or_paid=datetime.date.today(),
+            date_received_or_paid=timezone.localdate(),
             description=f"Reversal of transaction #{transaction_obj.pk}: {reason}",
             created_by=created_by,
             reverses=transaction_obj,

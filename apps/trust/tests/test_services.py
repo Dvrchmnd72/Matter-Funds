@@ -45,6 +45,30 @@ class TrustServiceTestCase(TestCase):
             matter=self.matter, trust_account=self.trust_account
         )
 
+
+    def test_future_dated_receipt_is_blocked(self):
+        future_date = timezone.localdate() + datetime.timedelta(days=1)
+        with self.assertRaisesMessage(ValidationError, 'cannot be future-dated'):
+            create_receipt(
+                matter_ledger=self.ledger, amount=Decimal('100.00'),
+                date_received=future_date, payor_name='Client A',
+                payment_method='eft', purpose='Future receipt', created_by=self.admin_user
+            )
+
+    def test_future_dated_payment_is_blocked(self):
+        create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('1000.00'),
+            date_received=timezone.localdate(), payor_name='Client A',
+            payment_method='eft', purpose='Retainer', created_by=self.admin_user
+        )
+        future_date = timezone.localdate() + datetime.timedelta(days=1)
+        with self.assertRaisesMessage(ValidationError, 'cannot be future-dated'):
+            create_payment(
+                matter_ledger=self.ledger, amount=Decimal('100.00'), date_paid=future_date,
+                payee_name='Expert', payment_method='eft', purpose='Future payment',
+                authorised_by=self.admin_user, created_by=self.admin_user
+            )
+
     def test_eft_receipt_deposited_same_day_is_not_late(self):
         received = datetime.date(2024, 1, 10)
         receipt = create_receipt(
@@ -55,11 +79,11 @@ class TrustServiceTestCase(TestCase):
         self.assertFalse(receipt.late_banking)
         self.assertEqual(receipt.transaction.date_banked, received)
 
-    def test_receipt_late_deposit_uses_five_working_day_window(self):
+    def test_receipt_deposit_delay_does_not_use_five_working_day_grace_period(self):
         receipt = create_receipt(
             matter_ledger=self.ledger, amount=Decimal('250.00'),
             date_received=datetime.date(2024, 1, 8),
-            date_banked=datetime.date(2024, 1, 16),
+            date_banked=datetime.date(2024, 1, 9),
             payor_name='Client A', payment_method='cash', purpose='Retainer',
             created_by=self.admin_user
         )
@@ -93,6 +117,71 @@ class TrustServiceTestCase(TestCase):
         self.assertEqual(captured['rows'][0][0], '2024-01-10')
         self.assertEqual(captured['rows'][0][1], '2024-01-09')
         self.assertEqual(captured['rows'][0][2], '2024-01-09')
+
+    def test_receipts_cash_book_filters_by_receipt_made_out_date(self):
+        jan_receipt = create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('250.00'),
+            date_received=datetime.date(2024, 1, 31),
+            payor_name='Client A', payment_method='direct_deposit', purpose='January received',
+            created_by=self.admin_user
+        )
+        feb_receipt = create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('300.00'),
+            date_received=datetime.date(2024, 1, 31),
+            payor_name='Client B', payment_method='direct_deposit', purpose='February made out',
+            created_by=self.admin_user
+        )
+        TrustTransaction.objects.filter(pk=jan_receipt.transaction_id).update(
+            created_at=timezone.make_aware(datetime.datetime(2024, 1, 31, 23, 0))
+        )
+        TrustTransaction.objects.filter(pk=feb_receipt.transaction_id).update(
+            created_at=timezone.make_aware(datetime.datetime(2024, 2, 1, 9, 0))
+        )
+
+        captured = {}
+        def fake_build(buffer, trust_account, title, subtitle, rows, col_headers):
+            captured[subtitle] = rows
+            buffer.write(b'pdf')
+
+        with patch.object(trust_reports, '_build_pdf_document', side_effect=fake_build):
+            trust_reports.receipts_cash_book_pdf_bytes(
+                self.trust_account, datetime.date(2024, 1, 1), datetime.date(2024, 1, 31)
+            )
+            trust_reports.receipts_cash_book_pdf_bytes(
+                self.trust_account, datetime.date(2024, 2, 1), datetime.date(2024, 2, 29)
+            )
+
+        self.assertEqual([row[5] for row in captured['2024-01-01 to 2024-01-31']], ['Client A'])
+        self.assertEqual([row[5] for row in captured['2024-02-01 to 2024-02-29']], ['Client B'])
+        self.assertEqual(captured['2024-02-01 to 2024-02-29'][0][1], '2024-01-31')
+
+    def test_ledger_balances_ignore_reversal_of_future_dated_original_edge_case(self):
+        receipt = create_receipt(
+            matter_ledger=self.ledger, amount=Decimal('250.00'),
+            date_received=datetime.date(2024, 1, 10),
+            payor_name='Client A', payment_method='direct_deposit', purpose='Retainer',
+            created_by=self.admin_user
+        )
+        TrustTransaction.objects.filter(pk=receipt.transaction_id).update(
+            date_received_or_paid=datetime.date(2024, 3, 1),
+            is_reversed=True,
+        )
+        reversal = TrustTransaction.objects.create(
+            transaction_type='reversal',
+            matter_ledger=self.ledger,
+            amount=Decimal('250.00'),
+            date_received_or_paid=datetime.date(2024, 2, 1),
+            description='Backdated edge-case reversal',
+            created_by=self.admin_user,
+            reverses_id=receipt.transaction_id,
+        )
+
+        balances = trust_reports.calculate_ledger_balances_as_at(
+            self.trust_account, datetime.date(2024, 2, 29)
+        )
+
+        self.assertEqual(balances[self.ledger.pk], Decimal('0.00'))
+        self.assertEqual(reversal.reverses.date_received_or_paid, datetime.date(2024, 3, 1))
 
     def test_receipt_pdf_includes_nsw_receipt_dates(self):
         receipt = create_receipt(

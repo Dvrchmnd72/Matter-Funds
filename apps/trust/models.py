@@ -107,9 +107,25 @@ class TrustTransaction(models.Model):
     def __str__(self):
         return f"{self.get_transaction_type_display()} ${self.amount} on {self.date_received_or_paid}"
 
+    def clean(self):
+        super().clean()
+        if (
+            self.transaction_type in {'receipt', 'payment', 'transfer_to_office'}
+            and self.date_received_or_paid
+            and self.date_received_or_paid > timezone.localdate()
+        ):
+            raise ValidationError({'date_received_or_paid': 'Trust receipts and payments cannot be future-dated.'})
+        if (
+            self.transaction_type == 'receipt'
+            and self.date_banked
+            and self.date_banked > timezone.localdate()
+        ):
+            raise ValidationError({'date_banked': 'Trust receipt deposit date cannot be future-dated.'})
+
     def save(self, *args, **kwargs):
         if self.pk is not None:
             raise PermissionError("TrustTransaction is append-only; create a reversal instead.")
+        self.full_clean()
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
@@ -209,8 +225,8 @@ class Receipt(models.Model):
         return timezone.localdate(self.transaction.created_at)
 
     def clean(self):
-        # Late banking is calculated in the receipt service against NSW timing rules.
-        # Do not apply a Queensland-style one-day assumption here.
+        # Deposit delay is calculated in the receipt service as a review indicator.
+        # Do not treat any recording deadline as a banking grace period.
         return super().clean()
 
 

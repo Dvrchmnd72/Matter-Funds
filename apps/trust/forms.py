@@ -1,6 +1,6 @@
-import datetime
 from decimal import Decimal
 from django import forms
+from django.utils import timezone
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
 from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount, TrustAccountingPeriod
@@ -15,7 +15,7 @@ class ReceiptForm(forms.Form):
             'that funds were in the trust account.'
         ),
         widget=forms.DateInput(attrs={'type': 'date'}),
-        initial=datetime.date.today,
+        initial=timezone.localdate,
     )
     date_banked = forms.DateField(
         label='Date deposited to trust account',
@@ -30,6 +30,27 @@ class ReceiptForm(forms.Form):
     cheque_number = forms.CharField(max_length=50, required=False)
     purpose = forms.CharField(max_length=500)
 
+    def clean_date_received(self):
+        date_received = self.cleaned_data['date_received']
+        if date_received > timezone.localdate():
+            raise forms.ValidationError('Trust receipt date received / confirmed cannot be future-dated.')
+        return date_received
+
+    def clean_date_banked(self):
+        date_banked = self.cleaned_data.get('date_banked')
+        if date_banked and date_banked > timezone.localdate():
+            raise forms.ValidationError('Trust receipt date deposited cannot be future-dated.')
+        return date_banked
+
+    def clean(self):
+        cleaned_data = super().clean()
+        method = cleaned_data.get('payment_method')
+        date_banked = cleaned_data.get('date_banked')
+        if method in {'cash', 'cheque'} and not date_banked:
+            self.add_error('date_banked', 'Date deposited to trust account is required for cash or cheque receipts.')
+        return cleaned_data
+
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.helper = FormHelper()
@@ -39,13 +60,19 @@ class ReceiptForm(forms.Form):
 
 class PaymentForm(forms.Form):
     amount = forms.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
-    date_paid = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}), initial=datetime.date.today)
+    date_paid = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}), initial=timezone.localdate)
     payee_name = forms.CharField(max_length=255)
     payee_bsb = forms.CharField(max_length=7, required=False)
     payee_account = forms.CharField(max_length=20, required=False)
     payment_method = forms.ChoiceField(choices=[('cheque', 'Cheque'), ('eft', 'EFT')])
     cheque_number = forms.CharField(max_length=50, required=False)
     purpose = forms.CharField(max_length=500)
+
+    def clean_date_paid(self):
+        date_paid = self.cleaned_data['date_paid']
+        if date_paid > timezone.localdate():
+            raise forms.ValidationError('Trust payment date paid cannot be future-dated.')
+        return date_paid
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -56,7 +83,7 @@ class PaymentForm(forms.Form):
 
 class TransferCostsToOfficeForm(forms.Form):
     amount = forms.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
-    date_paid = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}), initial=datetime.date.today)
+    date_paid = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}), initial=timezone.localdate)
     payee_name = forms.CharField(max_length=255, label='Office account name')
     payee_bsb = forms.CharField(max_length=7, required=False, label='Office account BSB')
     payee_account = forms.CharField(max_length=20, required=False, label='Office account number')
@@ -80,6 +107,12 @@ class TransferCostsToOfficeForm(forms.Form):
         self.helper = FormHelper()
         self.helper.form_tag = False
         self.helper.add_input(Submit('submit', 'Transfer Costs to Office'))
+
+    def clean_date_paid(self):
+        date_paid = self.cleaned_data['date_paid']
+        if date_paid > timezone.localdate():
+            raise forms.ValidationError('Trust payment date paid cannot be future-dated.')
+        return date_paid
 
     def clean(self):
         cleaned_data = super().clean()
@@ -240,7 +273,7 @@ class DateRangeForm(forms.Form):
 
 
 class YearForm(forms.Form):
-    year = forms.IntegerField(initial=datetime.date.today().year, min_value=2000, max_value=2100)
+    year = forms.IntegerField(initial=timezone.localdate().year, min_value=2000, max_value=2100)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
