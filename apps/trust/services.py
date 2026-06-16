@@ -67,14 +67,14 @@ def ensure_period_is_open(trust_account, date_value):
     return period
 
 
-def get_receipt_made_out_local_date():
-    """Return the local date that a receipt created now will be made out.
+def get_receipt_made_out_local_date(made_out_at=None):
+    """Return the local date that a receipt made out at a timestamp uses.
 
     Receipt.date_made_out is derived from TrustTransaction.created_at using
     timezone.localdate(), so pre-creation period-lock checks must use the same
     timezone-aware basis.
     """
-    return timezone.localdate(timezone.now())
+    return timezone.localdate(made_out_at or timezone.now())
 
 
 def required_monthly_record_types():
@@ -240,6 +240,8 @@ def lock_accounting_period(period, user):
 
 def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
                    payor_name, payment_method, cheque_number='', purpose, created_by):
+    made_out_at = timezone.now()
+    made_out_date = timezone.localdate(made_out_at)
     amount = _quantize(amount)
     _validate_not_future(date_received, 'Trust receipt date received / confirmed')
     if date_banked:
@@ -251,7 +253,7 @@ def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
         trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
-        ensure_period_is_open(trust_account, get_receipt_made_out_local_date())
+        ensure_period_is_open(trust_account, made_out_date)
 
         receipt_number = trust_account.next_receipt_number
         trust_account.next_receipt_number += 1
@@ -265,6 +267,7 @@ def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
             date_banked=date_banked,
             description=f"Receipt: {purpose}",
             created_by=created_by,
+            created_at=made_out_at,
         )
         txn.save()
 

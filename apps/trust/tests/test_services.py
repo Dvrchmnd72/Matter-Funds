@@ -67,6 +67,39 @@ class TrustServiceTestCase(TestCase):
         period.save()
         return period
 
+
+    @override_settings(TIME_ZONE='Australia/Sydney')
+    def test_receipt_creation_uses_single_captured_made_out_timestamp_across_boundary(self):
+        self._set_period_status(datetime.date(2024, 5, 15), TrustAccountingPeriod.STATUS_OPEN)
+        self._set_period_status(datetime.date(2024, 6, 15), TrustAccountingPeriod.STATUS_LOCKED)
+        captured_made_out_at = timezone.make_aware(
+            datetime.datetime(2024, 5, 31, 13, 59),
+            datetime.timezone.utc,
+        )
+        later_after_local_month_boundary = timezone.make_aware(
+            datetime.datetime(2024, 5, 31, 14, 1),
+            datetime.timezone.utc,
+        )
+
+        with patch.object(
+            timezone,
+            'now',
+            side_effect=[captured_made_out_at] + [later_after_local_month_boundary] * 10,
+        ):
+            receipt = create_receipt(
+                matter_ledger=self.ledger,
+                amount=Decimal('250.00'),
+                date_received=datetime.date(2024, 5, 31),
+                payor_name='Client A',
+                payment_method='direct_deposit',
+                purpose='Created across local month boundary',
+                created_by=self.admin_user,
+            )
+
+        receipt.refresh_from_db()
+        self.assertEqual(receipt.transaction.created_at, captured_made_out_at)
+        self.assertEqual(receipt.date_made_out, datetime.date(2024, 5, 31))
+
     @override_settings(TIME_ZONE='Australia/Sydney')
     def test_receipt_lock_check_uses_made_out_local_date_not_date_received(self):
         self._set_period_status(datetime.date(2024, 5, 15), TrustAccountingPeriod.STATUS_LOCKED)
