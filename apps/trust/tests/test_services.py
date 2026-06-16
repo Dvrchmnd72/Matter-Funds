@@ -96,6 +96,7 @@ class TrustServiceTestCase(TestCase):
             created_by=self.admin_user
         )
         self.assertIsNotNone(payment.pk)
+        self.assertEqual(payment.authorised_by, self.admin_user)
         self.assertIsNone(payment.second_authoriser)
 
     def test_payment_eft_allowed_for_sole_practitioner(self):
@@ -113,21 +114,6 @@ class TrustServiceTestCase(TestCase):
             created_by=self.admin_user
         )
         self.assertIsNotNone(payment.pk)
-
-    def test_payment_fails_when_second_authoriser_matches_authorised_by(self):
-        create_receipt(
-            matter_ledger=self.ledger, amount=Decimal('1000.00'),
-            date_received=datetime.date.today(), payor_name='Client',
-            payment_method='eft', purpose='Retainer', created_by=self.admin_user
-        )
-        with self.assertRaises(ValidationError):
-            create_payment(
-                matter_ledger=self.ledger, amount=Decimal('500.00'),
-                date_paid=datetime.date.today(), payee_name='Expert',
-                payment_method='eft', purpose='Expert fee',
-                authorised_by=self.admin_user, second_authoriser=self.admin_user,
-                created_by=self.admin_user
-            )
 
     def test_transfer_to_office_creates_transaction_and_payment_and_decrements_balance(self):
         self.firm.is_sole_practitioner = True
@@ -207,24 +193,8 @@ class TrustServiceTestCase(TestCase):
             costs_evidence_file=SimpleUploadedFile('bill.pdf', b'bill evidence'),
         )
         self.assertIsNotNone(payment.pk)
+        self.assertEqual(payment.authorised_by, self.admin_user)
         self.assertIsNone(payment.second_authoriser)
-
-    def test_transfer_to_office_fails_when_second_authoriser_matches_authorised_by(self):
-        create_receipt(
-            matter_ledger=self.ledger, amount=Decimal('1000.00'),
-            date_received=datetime.date.today(), payor_name='Client',
-            payment_method='eft', purpose='Retainer', created_by=self.admin_user
-        )
-        with self.assertRaises(ValidationError):
-            create_transfer_to_office(
-                matter_ledger=self.ledger, amount=Decimal('300.00'),
-                date_paid=datetime.date.today(), payee_name='Office Account',
-                payment_method='eft', purpose='Costs transfer',
-                authorised_by=self.admin_user, second_authoriser=self.admin_user,
-                created_by=self.admin_user,
-                costs_withdrawal_method='method_1_bill_issued',
-                costs_evidence_file=SimpleUploadedFile('bill.pdf', b'bill evidence'),
-            )
 
     def test_payments_journal_includes_transfer_to_office_rows(self):
         self.firm.is_sole_practitioner = True

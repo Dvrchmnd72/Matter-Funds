@@ -156,7 +156,6 @@ class PaymentCreateView(StaffRequiredMixin, View):
                     cheque_number=cd.get('cheque_number', ''),
                     purpose=cd['purpose'],
                     authorised_by=request.user,
-                    second_authoriser=cd.get('second_authoriser'),
                     created_by=request.user,
                 )
                 messages.success(request, f'Payment #{payment.payment_number} created successfully.')
@@ -197,7 +196,6 @@ class TransferCostsToOfficeCreateView(AdminOrAccountantMixin, View):
                     cheque_number=cd.get('cheque_number', ''),
                     purpose=cd['purpose'],
                     authorised_by=request.user,
-                    second_authoriser=cd.get('second_authoriser'),
                     created_by=request.user,
                     costs_withdrawal_method=cd['costs_withdrawal_method'],
                     key_evidence_date=cd.get('key_evidence_date'),

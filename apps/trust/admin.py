@@ -87,6 +87,7 @@ class PaymentAdmin(_ReadOnlyAppendMixin, admin.ModelAdmin):
     list_display = ['payment_number', 'transaction_type', 'payee_name', 'payment_method', 'purpose', 'authorised_by', 'costs_withdrawal_method']
     search_fields = ['payee_name', 'purpose', 'costs_withdrawal_notes']
     readonly_fields = ['payment_number', 'transaction']
+    exclude = ['second_authoriser']
 
     def transaction_type(self, obj):
         return obj.transaction.get_transaction_type_display()
@@ -103,7 +104,6 @@ class PaymentAdmin(_ReadOnlyAppendMixin, admin.ModelAdmin):
             cheque_number=obj.cheque_number,
             purpose=obj.purpose,
             authorised_by=obj.authorised_by,
-            second_authoriser=obj.second_authoriser,
             created_by=request.user,
         )
 

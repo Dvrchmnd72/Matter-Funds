@@ -220,7 +220,7 @@ def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
 
 def create_payment(*, matter_ledger, amount, date_paid, payee_name, payee_bsb='',
                    payee_account='', payment_method, cheque_number='', purpose,
-                   authorised_by, second_authoriser=None, created_by):
+                   authorised_by, created_by):
     amount = _quantize(amount)
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
@@ -254,7 +254,6 @@ def create_payment(*, matter_ledger, amount, date_paid, payee_name, payee_bsb=''
             cheque_number=cheque_number,
             purpose=purpose,
             authorised_by=authorised_by,
-            second_authoriser=second_authoriser,
         )
         payment.full_clean()
         payment.save()
@@ -283,7 +282,7 @@ def _validate_costs_withdrawal_evidence(*, costs_withdrawal_method, costs_eviden
 
 def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, payee_bsb='',
                               payee_account='', payment_method, cheque_number='', purpose,
-                              authorised_by, second_authoriser=None, created_by,
+                              authorised_by, created_by,
                               costs_withdrawal_method, key_evidence_date=None,
                               costs_evidence_file=None, notice_or_request_file=None,
                               authority_or_agreement_file=None, reimbursement_evidence_file=None,
@@ -328,7 +327,6 @@ def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, p
             cheque_number=cheque_number,
             purpose=purpose,
             authorised_by=authorised_by,
-            second_authoriser=second_authoriser,
             costs_withdrawal_method=costs_withdrawal_method,
             key_evidence_date=key_evidence_date,
             costs_evidence_file=costs_evidence_file,

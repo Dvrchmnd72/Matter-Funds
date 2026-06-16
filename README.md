@@ -137,7 +137,6 @@ described in the Law Society of NSW Legal Accounting Handbook (8th Ed., Jan 2020
 | R41 Banking timing | Receipt.late_banking flag |
 | R42 Irregularities | apps/trust/models.py::Irregularity (auto-created on failed recon) |
 | R43–R45 Payments | apps/trust/models.py::Payment + services.create_payment |
-| Optional EFT dual auth policy | Payment.second_authoriser records an optional firm-policy second authoriser; NSW Rule 43 compliance requires authorised EFT withdrawal, not mandatory dual authorisation. |
 | R45 Trust ledger | apps/trust/models.py::MatterLedger |
 | R47 Monthly recon | apps/trust/models.py::MonthlyReconciliation |
 | R50–R54 Controlled money | apps/trust/models.py::ControlledMoneyAccount |

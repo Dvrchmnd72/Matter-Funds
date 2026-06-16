@@ -378,7 +378,6 @@ class PhaseAMonthlyCloseTestCase(TestCase):
             'payment_method': 'eft',
             'cheque_number': '',
             'purpose': 'Guessed costs transfer',
-            'second_authoriser': '',
             'costs_withdrawal_method': 'method_1_bill_issued',
             'key_evidence_date': '2024-03-01',
             'costs_evidence_file': SimpleUploadedFile('bill.pdf', b'bill evidence'),

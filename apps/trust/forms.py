@@ -33,17 +33,9 @@ class PaymentForm(forms.Form):
     payment_method = forms.ChoiceField(choices=[('cheque', 'Cheque'), ('eft', 'EFT')])
     cheque_number = forms.CharField(max_length=50, required=False)
     purpose = forms.CharField(max_length=500)
-    second_authoriser = forms.ModelChoiceField(
-        queryset=None, required=False, help_text='Optional firm policy authoriser; not required for NSW Rule 43 compliance.'
-    )
 
     def __init__(self, *args, **kwargs):
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
         super().__init__(*args, **kwargs)
-        self.fields['second_authoriser'].queryset = User.objects.filter(
-            role__in=['admin', 'solicitor', 'accountant']
-        )
         self.helper = FormHelper()
         self.helper.form_tag = False
         self.helper.add_input(Submit('submit', 'Create Payment'))
@@ -58,9 +50,6 @@ class TransferCostsToOfficeForm(forms.Form):
     payment_method = forms.ChoiceField(choices=[('cheque', 'Cheque'), ('eft', 'EFT')])
     cheque_number = forms.CharField(max_length=50, required=False)
     purpose = forms.CharField(max_length=500, initial='Transfer legal costs to office account')
-    second_authoriser = forms.ModelChoiceField(
-        queryset=None, required=False, help_text='Optional firm policy authoriser; not required for NSW Rule 43 compliance.'
-    )
     costs_withdrawal_method = forms.ChoiceField(choices=Payment.COSTS_WITHDRAWAL_METHOD_CHOICES)
     key_evidence_date = forms.DateField(
         widget=forms.DateInput(attrs={'type': 'date'}),
@@ -74,12 +63,7 @@ class TransferCostsToOfficeForm(forms.Form):
     costs_withdrawal_notes = forms.CharField(widget=forms.Textarea, required=False)
 
     def __init__(self, *args, **kwargs):
-        from django.contrib.auth import get_user_model
-        User = get_user_model()
         super().__init__(*args, **kwargs)
-        self.fields['second_authoriser'].queryset = User.objects.filter(
-            role__in=['admin', 'solicitor', 'accountant']
-        )
         self.helper = FormHelper()
         self.helper.form_tag = False
         self.helper.add_input(Submit('submit', 'Transfer Costs to Office'))
