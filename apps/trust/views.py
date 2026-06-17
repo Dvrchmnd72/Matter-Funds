@@ -724,6 +724,7 @@ class TrustRecordsExportPackZipView(AdminOrAccountantMixin, View):
             date_to=date_to,
             year=year,
             all_data=request.GET.get('all') in {'1', 'true', 'yes'},
+            include_technical=request.GET.get('include_technical') in {'1', 'true', 'yes'},
         )
 
 
