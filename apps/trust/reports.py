@@ -540,7 +540,7 @@ def controlled_money_monthly_statement_pdf_bytes(statement):
     accounts = ControlledMoneyAccount.objects.filter(firm=statement.firm, opened_on__lte=statement.period_end).filter(Q(closed_on__isnull=True)|Q(closed_on__gte=statement.period_end)).order_by('account_name')
     rows = [[a.account_name, a.account_number, str(a.current_balance), a.person_on_behalf, a.matter_description] for a in accounts]
     rows += [['Date statement prepared', str(statement.prepared_on), '', '', ''], ['Due date (15 NSW working days)', str(statement.due_date), '', '', ''], ['Reviewed by', str(statement.reviewed_by or ''), str(statement.reviewed_on or ''), statement.reviewer_role_confirmation, statement.review_note]]
-    buffer = io.BytesIO(); _build_pdf_document(buffer, accounts.first() or TrustAccount.objects.filter(firm=statement.firm).first(), 'Controlled Money Monthly Statement – in progress', f'As at {statement.period_end}', rows, ['Account name','Account number','Register balance','Person on behalf','Matter description'])
+    buffer = io.BytesIO(); _build_pdf_document(buffer, accounts.first() or TrustAccount.objects.filter(firm=statement.firm).first(), 'Controlled Money Monthly Statement', f'As at {statement.period_end}', rows, ['Account name','Account number','Register balance','Person on behalf','Matter description'])
     return buffer.getvalue()
 
 
