@@ -626,7 +626,13 @@ def trust_records_export_pack_zip(trust_account, date_from=None, date_to=None, y
             add(zf, f'controlled-money/receipts/receipt_{receipt.receipt_number}.pdf', controlled_money_receipt_pdf_bytes(receipt), 'controlled-money-record')
         for doc in ControlledMoneySupportingDocument.objects.filter(controlled_money_account__firm=trust_account.firm):
             if doc.document:
-                add(zf, f'controlled-money/supporting-documents/{doc.document.name.split('/')[-1]}', doc.document.read(), 'controlled-money-evidence')
+                filename = doc.document.name.rsplit("/", 1)[-1]
+                add(
+                    zf,
+                    f"controlled-money/supporting-documents/{filename}",
+                    doc.document.read(),
+                    "controlled-money-evidence",
+                )
 
         txns = list(TrustTransaction.objects.filter(matter_ledger__trust_account=trust_account, date_received_or_paid__range=(date_from, date_to)).values('id', 'transaction_type', 'amount', 'date_received_or_paid', 'description', 'matter_ledger_id'))
         csv_export(zf, 'exports/trust_transactions.csv', txns, ['id', 'transaction_type', 'amount', 'date_received_or_paid', 'description', 'matter_ledger_id'])
