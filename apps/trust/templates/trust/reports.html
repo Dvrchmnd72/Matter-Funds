@@ -34,9 +34,35 @@
       <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-secondary">Ledger Reconciliation PDF</button></div>
     </form>
     <h5 class="mt-3">Examiner Pack (select year)</h5>
+    <p class="text-muted small mb-2">Existing limited examiner-style pack.</p>
     <form method="get" action="{% url 'trust:examiner_pack' account.pk %}" class="row g-2">
       <div class="col-auto"><input type="number" name="year" class="form-control form-control-sm" value="{{ year_form.year.value }}" min="2000" max="2100"></div>
       <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-dark">Download ZIP</button></div>
+    </form>
+    <h5 class="mt-4">Trust Records Export Pack</h5>
+    <p class="text-muted small mb-2">
+      Download a complete trust-record evidence pack for off-platform storage, examiner review, retention, or Law Society production requests.
+      Includes manifest, SHA256 hashes, CSV exports, JSON export, retained monthly records, reconciliation records, receipts/payments/ledger data,
+      trust account statements, and controlled money records where available.
+    </p>
+    <form method="get" action="{% url 'trust:trust_records_export_pack' account.pk %}" class="row g-2">
+      <div class="col-auto">
+        <label class="form-label form-label-sm" for="trust-records-year-{{ account.pk }}">Year</label>
+        <input id="trust-records-year-{{ account.pk }}" type="number" name="year" class="form-control form-control-sm" value="{{ year_form.year.value }}" min="2000" max="2100">
+      </div>
+      <div class="col-auto">
+        <label class="form-label form-label-sm" for="trust-records-from-{{ account.pk }}">Date from</label>
+        <input id="trust-records-from-{{ account.pk }}" type="date" name="date_from" class="form-control form-control-sm">
+      </div>
+      <div class="col-auto">
+        <label class="form-label form-label-sm" for="trust-records-to-{{ account.pk }}">Date to</label>
+        <input id="trust-records-to-{{ account.pk }}" type="date" name="date_to" class="form-control form-control-sm">
+      </div>
+      <div class="col-auto form-check align-self-end mb-1">
+        <input id="trust-records-all-{{ account.pk }}" type="checkbox" name="all" value="1" class="form-check-input">
+        <label class="form-check-label" for="trust-records-all-{{ account.pk }}">All data</label>
+      </div>
+      <div class="col-auto align-self-end"><button type="submit" class="btn btn-sm btn-outline-dark">Download Trust Records ZIP</button></div>
     </form>
   </div>
 </div>

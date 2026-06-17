@@ -193,6 +193,49 @@ class TrustViewTestCase(TestCase):
         list_response = self.tc.get(reverse('trust:irregularity_list'))
         self.assertContains(list_response, 'Manual deficiency report')
 
+    def test_reports_page_exposes_trust_records_export_pack_separately(self):
+        self.tc.login(username='admin_view', password='testpass123')
+        response = self.tc.get(reverse('trust:reports'))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Examiner Pack (select year)')
+        self.assertContains(response, 'Existing limited examiner-style pack')
+        self.assertContains(response, 'Trust Records Export Pack')
+        self.assertContains(response, 'Download a complete trust-record evidence pack')
+        self.assertContains(response, 'Download Trust Records ZIP')
+        self.assertContains(response, reverse('trust:examiner_pack', kwargs={'pk': self.trust_account.pk}))
+        self.assertContains(response, reverse('trust:trust_records_export_pack', kwargs={'pk': self.trust_account.pk}))
+
+    def test_trust_records_export_pack_download_contains_required_evidence_files(self):
+        import io
+        import zipfile
+        from apps.trust import reports as trust_reports
+
+        self.tc.login(username='admin_view', password='testpass123')
+        url = reverse('trust:trust_records_export_pack', kwargs={'pk': self.trust_account.pk})
+        with patch.object(trust_reports, 'receipts_cash_book_pdf_bytes', return_value=b'receipts'), \
+             patch.object(trust_reports, 'payments_cash_book_pdf_bytes', return_value=b'payments'), \
+             patch.object(trust_reports, 'trust_transfer_journal_pdf_bytes', return_value=b'journals'), \
+             patch.object(trust_reports, 'trial_balance_pdf_bytes', return_value=b'trial'), \
+             patch.object(trust_reports, 'matter_ledger_statement_pdf') as ledger_pdf, \
+             patch.object(trust_reports, 'trust_account_statement_pdf_bytes', return_value=b'trust statement'):
+            ledger_pdf.return_value.content = b'ledger statement'
+            response = self.tc.get(url, {'year': '2024'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/zip')
+        zf = zipfile.ZipFile(io.BytesIO(response.content))
+        names = zf.namelist()
+        self.assertIn('manifest.json', names)
+        self.assertIn('SHA256SUMS.txt', names)
+        self.assertIn('exports/trust_transactions.csv', names)
+        self.assertIn('exports/trust_transactions.json', names)
+        self.assertIn('exports/matter_ledgers.json', names)
+
+    def test_trust_records_export_pack_requires_admin_or_accountant(self):
+        self.tc.login(username='solicitor_view', password='testpass123')
+        response = self.tc.get(reverse('trust:trust_records_export_pack', kwargs={'pk': self.trust_account.pk}))
+        self.assertIn(response.status_code, [302, 403])
+
     def test_account_detail_shows_distinct_ledger_statement_actions(self):
         self.tc.login(username='admin_view', password='testpass123')
         response = self.tc.get(reverse('trust:account_detail', kwargs={'pk': self.trust_account.pk}))
