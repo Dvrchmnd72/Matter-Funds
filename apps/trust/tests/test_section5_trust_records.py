@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.clients.models import Client
 from apps.firms.models import Firm
@@ -59,8 +60,9 @@ class Section5TrustRecordCompletenessTests(TestCase):
             trust_account=self.trust,
             period_start=datetime.date(2024, 3, 1),
             period_end=datetime.date(2024, 3, 31),
-            status='closed',
-            closed_by=self.admin,
+            status=TrustAccountingPeriod.STATUS_LOCKED,
+            locked_by=self.admin,
+            locked_on=timezone.now(),
         )
         reconciliation = MonthlyReconciliation.objects.create(
             trust_account=self.trust,
