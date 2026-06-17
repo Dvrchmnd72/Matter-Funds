@@ -7,10 +7,38 @@
   <dt class="col-sm-3">Bank</dt><dd class="col-sm-9">{{ account.bank }}</dd>
   <dt class="col-sm-3">BSB</dt><dd class="col-sm-9">{{ account.bsb }}</dd>
   <dt class="col-sm-3">Account #</dt><dd class="col-sm-9">{{ account.account_number }}</dd>
+  <dt class="col-sm-3">Opened on</dt><dd class="col-sm-9">{{ account.opened_on|default:"—" }}</dd>
+  <dt class="col-sm-3">Law Society opening notice</dt>
+  <dd class="col-sm-9">
+    {{ account.law_society_opening_notice_sent_on|default:"Not recorded" }}
+    {% if account.opening_notice_due_on %}<span class="text-muted">(due {{ account.opening_notice_due_on }})</span>{% endif %}
+  </dd>
+  <dt class="col-sm-3">Closed on</dt><dd class="col-sm-9">{{ account.closed_on|default:"—" }}</dd>
+  <dt class="col-sm-3">Law Society closure notice</dt>
+  <dd class="col-sm-9">
+    {{ account.law_society_closure_notice_sent_on|default:"Not applicable / not recorded" }}
+    {% if account.closure_notice_due_on %}<span class="text-muted">(due {{ account.closure_notice_due_on }})</span>{% endif %}
+  </dd>
 </dl>
+
+{% if account.section_6a_warnings %}
+<div class="alert alert-warning">
+  <strong>Section 6A review items:</strong>
+  <ul class="mb-0">
+    {% for warning in account.section_6a_warnings %}
+      <li>{{ warning }}</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <div class="d-flex gap-2 mb-4">
-  <a href="{% url 'trust:journal_create' %}?trust_account={{ account.pk }}" class="btn btn-secondary">New Journal</a>
-  <a href="{% url 'trust:reconciliation_create' account.pk %}" class="btn btn-outline-primary">New Reconciliation</a>
+  {% if account.is_active %}
+    <a href="{% url 'trust:journal_create' %}?trust_account={{ account.pk }}" class="btn btn-secondary">New Journal</a>
+    <a href="{% url 'trust:reconciliation_create' account.pk %}" class="btn btn-outline-primary">New Reconciliation</a>
+  {% else %}
+    <span class="badge bg-secondary align-self-center">Closed trust account — transactions disabled</span>
+  {% endif %}
   <a href="{% url 'trust:reports' %}" class="btn btn-outline-secondary">Reports</a>
 </div>
 <h2>Ledgers</h2>
@@ -22,9 +50,11 @@
       <td>{{ ledger.matter }}</td>
       <td>${{ ledger.balance }}</td>
       <td>
-        <a href="{% url 'trust:receipt_create' ledger.pk %}" class="btn btn-success btn-sm">Receipt</a>
-        <a href="{% url 'trust:payment_create' ledger.pk %}" class="btn btn-warning btn-sm">Payment</a>
-        <a href="{% url 'trust:transfer_costs_to_office_create' ledger.pk %}" class="btn btn-outline-warning btn-sm">Transfer Costs to Office</a>
+        {% if account.is_active %}
+          <a href="{% url 'trust:receipt_create' ledger.pk %}" class="btn btn-success btn-sm">Receipt</a>
+          <a href="{% url 'trust:payment_create' ledger.pk %}" class="btn btn-warning btn-sm">Payment</a>
+          <a href="{% url 'trust:transfer_costs_to_office_create' ledger.pk %}" class="btn btn-outline-warning btn-sm">Transfer Costs to Office</a>
+        {% endif %}
         <a href="{% url 'trust:ledger_statement_pdf' ledger.pk %}" class="btn btn-outline-info btn-sm">Matter Ledger Statement</a>
         <a href="{% url 'trust:trust_account_statement_pdf' ledger.pk %}" class="btn btn-outline-info btn-sm">Trust Account Statement</a>
       </td>

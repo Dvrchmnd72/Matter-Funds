@@ -12,9 +12,33 @@ from .services import create_receipt, create_payment
 
 @admin.register(TrustAccount)
 class TrustAccountAdmin(admin.ModelAdmin):
-    list_display = ['name', 'firm', 'bank', 'bsb', 'account_number', 'is_general', 'is_active']
+    list_display = [
+        'name', 'firm', 'bank', 'bsb', 'account_number',
+        'opened_on', 'closed_on', 'law_society_opening_notice_sent_on',
+        'law_society_closure_notice_sent_on', 'is_general', 'is_active',
+    ]
     list_filter = ['firm', 'is_general', 'is_active']
-    search_fields = ['name', 'bsb', 'account_number']
+    search_fields = ['name', 'bank', 'bsb', 'account_number']
+    fieldsets = (
+        (None, {
+            'fields': (
+                'firm', 'name', 'bank', 'bsb', 'account_number',
+                'is_general', 'is_active',
+            )
+        }),
+        ('Section 6A — General trust account record', {
+            'fields': (
+                'opened_on', 'law_society_opening_notice_sent_on',
+                'closed_on', 'law_society_closure_notice_sent_on',
+            )
+        }),
+        ('Sequencing', {
+            'fields': (
+                'next_receipt_number', 'next_payment_number',
+                'next_controlled_money_receipt_number',
+            )
+        }),
+    )
 
 
 @admin.register(ControlledMoneyAccount)

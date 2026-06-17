@@ -3,18 +3,28 @@
 {% block content %}
 <h1 class="mb-4">Trust Accounts</h1>
 <table class="table table-striped">
-  <thead><tr><th>Name</th><th>Firm</th><th>BSB</th><th>Account #</th><th>Active</th></tr></thead>
+  <thead><tr><th>Name</th><th>Firm</th><th>Bank</th><th>BSB</th><th>Account #</th><th>Opened</th><th>Closed</th><th>Section 6A</th><th>Active</th></tr></thead>
   <tbody>
     {% for account in accounts %}
     <tr>
       <td><a href="{% url 'trust:account_detail' account.pk %}">{{ account.name }}</a></td>
       <td>{{ account.firm }}</td>
+      <td>{{ account.bank }}</td>
       <td>{{ account.bsb }}</td>
       <td>{{ account.account_number }}</td>
+      <td>{{ account.opened_on|default:"—" }}</td>
+      <td>{{ account.closed_on|default:"—" }}</td>
+      <td>
+        {% if account.section_6a_warnings %}
+          <span class="badge bg-warning text-dark">{{ account.section_6a_warnings|length }} review item{{ account.section_6a_warnings|length|pluralize }}</span>
+        {% else %}
+          <span class="badge bg-success">OK</span>
+        {% endif %}
+      </td>
       <td>{{ account.is_active|yesno:"Yes,No" }}</td>
     </tr>
     {% empty %}
-    <tr><td colspan="5">No trust accounts found.</td></tr>
+    <tr><td colspan="9">No trust accounts found.</td></tr>
     {% endfor %}
   </tbody>
 </table>

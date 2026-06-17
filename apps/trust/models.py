@@ -31,6 +31,21 @@ class TrustAccount(models.Model):
     account_number = models.CharField(max_length=20)
     is_general = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
+
+    # Section 6A / Rule 35 and Rule 50 basic platform records
+    opened_on = models.DateField(default=timezone.localdate)
+    closed_on = models.DateField(null=True, blank=True)
+    law_society_opening_notice_sent_on = models.DateField(
+        null=True,
+        blank=True,
+        help_text='Optional admin record: Rule 50(1) notice sent within 14 days of opening.',
+    )
+    law_society_closure_notice_sent_on = models.DateField(
+        null=True,
+        blank=True,
+        help_text='Optional admin record: Rule 50(3) notice sent within 14 days of closure.',
+    )
+
     next_receipt_number = models.PositiveIntegerField(default=1)
     next_payment_number = models.PositiveIntegerField(default=1)
     next_controlled_money_receipt_number = models.PositiveIntegerField(default=1)
@@ -38,6 +53,50 @@ class TrustAccount(models.Model):
     class Meta:
         verbose_name = 'Trust Account'
         verbose_name_plural = 'Trust Accounts'
+
+    @property
+    def opening_notice_due_on(self):
+        if not self.opened_on:
+            return None
+        return self.opened_on + datetime.timedelta(days=14)
+
+    @property
+    def closure_notice_due_on(self):
+        if not self.closed_on:
+            return None
+        return self.closed_on + datetime.timedelta(days=14)
+
+    @property
+    def section_6a_warnings(self):
+        warnings = []
+        if self.is_general:
+            name_lower = (self.name or '').lower()
+            firm_name = (self.firm.name if self.firm_id else '').lower()
+
+            if firm_name and firm_name not in name_lower:
+                warnings.append('Confirm the account name includes the law practice/business name.')
+
+            if 'trust account' not in name_lower and 'trust a/c' not in name_lower:
+                warnings.append('Confirm the account name includes “Trust Account” or “Trust A/c”.')
+
+            if not self.opened_on:
+                warnings.append('Opening date has not been recorded.')
+
+            if self.closed_on and not self.law_society_closure_notice_sent_on:
+                warnings.append('Closure notice date has not been recorded.')
+
+        return warnings
+
+    def clean(self):
+        errors = {}
+        if self.closed_on and self.opened_on and self.closed_on < self.opened_on:
+            errors['closed_on'] = 'Closure date cannot be before opening date.'
+        if not self.is_active and not self.closed_on:
+            errors['closed_on'] = 'Closed trust accounts should record a closure date.'
+        if self.closed_on and self.closed_on > timezone.localdate():
+            errors['closed_on'] = 'Closure date cannot be future-dated.'
+        if errors:
+            raise ValidationError(errors)
 
     def __str__(self):
         return f"{self.name} ({self.bsb} {self.account_number})"

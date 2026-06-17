@@ -67,6 +67,13 @@ def ensure_period_is_open(trust_account, date_value):
     return period
 
 
+def ensure_trust_account_accepts_transactions(trust_account, date_value):
+    if not trust_account.is_active:
+        raise ValidationError('Trust account is closed; no new transactions can be recorded.')
+    if trust_account.closed_on and date_value and date_value > trust_account.closed_on:
+        raise ValidationError('Trust account is closed; no transactions can be recorded after the closure date.')
+
+
 def get_receipt_made_out_local_date(made_out_at=None):
     """Return the local date that a receipt made out at a timestamp uses.
 
@@ -257,6 +264,7 @@ def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
         trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
+        ensure_trust_account_accepts_transactions(trust_account, made_out_date)
         ensure_period_is_open(trust_account, made_out_date)
 
         receipt_number = trust_account.next_receipt_number
@@ -301,12 +309,13 @@ def create_payment(*, matter_ledger, amount, date_paid, payee_name, payee_bsb=''
     _validate_not_future(date_paid, 'Trust payment date paid')
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
-        ensure_period_is_open(ledger.trust_account, date_paid)
+        trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
+        ensure_trust_account_accepts_transactions(trust_account, date_paid)
+        ensure_period_is_open(trust_account, date_paid)
 
         if ledger.balance < amount:
             raise ValidationError(f"Insufficient trust funds: balance is {ledger.balance}, payment is {amount}.")
 
-        trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
         payment_number = trust_account.next_payment_number
         trust_account.next_payment_number += 1
         trust_account.save(update_fields=['next_payment_number'])
@@ -375,12 +384,13 @@ def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, p
     _validate_not_future(date_paid, 'Trust payment date paid')
     with transaction.atomic():
         ledger = MatterLedger.objects.select_for_update().get(pk=matter_ledger.pk)
-        ensure_period_is_open(ledger.trust_account, date_paid)
+        trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
+        ensure_trust_account_accepts_transactions(trust_account, date_paid)
+        ensure_period_is_open(trust_account, date_paid)
 
         if ledger.balance < amount:
             raise ValidationError(f"Insufficient trust funds: balance is {ledger.balance}, transfer is {amount}.")
 
-        trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
         payment_number = trust_account.next_payment_number
         trust_account.next_payment_number += 1
         trust_account.save(update_fields=['next_payment_number'])
@@ -438,7 +448,9 @@ def create_trust_journal(*, from_ledger, to_ledger, amount, description,
             raise ValidationError(f"Insufficient funds in source ledger: balance {from_l.balance}, journal amount {amount}.")
 
         today = timezone.localdate()
-        ensure_period_is_open(from_l.trust_account, today)
+        trust_account = TrustAccount.objects.select_for_update().get(pk=from_l.trust_account_id)
+        ensure_trust_account_accepts_transactions(trust_account, today)
+        ensure_period_is_open(trust_account, today)
 
         txn_out = TrustTransaction(
             transaction_type='journal_out',
@@ -489,7 +501,10 @@ def reverse_transaction(*, transaction_obj, reason, created_by):
             raise ValidationError("This transaction has already been reversed.")
 
         ledger = MatterLedger.objects.select_for_update().get(pk=transaction_obj.matter_ledger_id)
-        ensure_period_is_open(ledger.trust_account, timezone.localdate())
+        today = timezone.localdate()
+        trust_account = TrustAccount.objects.select_for_update().get(pk=ledger.trust_account_id)
+        ensure_trust_account_accepts_transactions(trust_account, today)
+        ensure_period_is_open(trust_account, today)
 
         txn_type = transaction_obj.transaction_type
         if txn_type in ('receipt', 'journal_in'):
