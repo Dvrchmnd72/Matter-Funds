@@ -32,10 +32,12 @@ FOOTER_TEXT = "Prepared from Matter Funds \u2014 refer to LPUGR Part 4.2"
 
 def _build_header_info(trust_account):
     firm = trust_account.firm
+    account_name = getattr(trust_account, "name", None) or getattr(trust_account, "account_name", "")
+    account_label = "Controlled Money Account" if hasattr(trust_account, "account_name") else "Trust Account"
     return [
         f"Firm: {firm.name}",
         f"ABN: {firm.abn}",
-        f"Trust Account: {trust_account.name}",
+        f"{account_label}: {account_name}",
         f"BSB: {trust_account.bsb}  Account: {trust_account.account_number}",
     ]
 

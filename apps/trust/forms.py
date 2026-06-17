@@ -295,13 +295,23 @@ class ControlledMoneyAccountForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         self.user = kwargs.pop('user', None)
         super().__init__(*args, **kwargs)
-        if self.user and self.user.firm_id and self.user.role != 'admin':
+        if self.user and self.user.firm_id:
+            self.instance.firm = self.user.firm
             self.fields['client'].queryset = Client.objects.filter(firm=self.user.firm)
             self.fields['matter'].queryset = Matter.objects.filter(firm=self.user.firm)
-        elif self.user and self.user.firm_id:
-            self.fields['client'].queryset = Client.objects.filter(firm=self.user.firm)
-            self.fields['matter'].queryset = Matter.objects.filter(firm=self.user.firm)
-        self.helper = FormHelper(); self.helper.form_tag = False; self.helper.add_input(Submit('submit', 'Save Controlled Money Account'))
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.add_input(Submit('submit', 'Save Controlled Money Account'))
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if self.user and self.user.firm_id:
+            self.instance.firm = self.user.firm
+            account_name = cleaned_data.get('account_name') or ''
+            firm_name = self.user.firm.name or ''
+            if firm_name and firm_name.lower() not in account_name.lower():
+                self.add_error('account_name', f'Controlled money account name must include the law practice name: {firm_name}.')
+        return cleaned_data
 
     def save(self, commit=True):
         obj = super().save(commit=False)
@@ -309,6 +319,7 @@ class ControlledMoneyAccountForm(forms.ModelForm):
             obj.firm = self.user.firm
         if commit:
             obj.save()
+            self.save_m2m()
         return obj
 
 
@@ -325,15 +336,28 @@ class ControlledMoneyReceiptForm(forms.ModelForm):
         if self.user and self.user.firm_id:
             qs = qs.filter(firm=self.user.firm)
         self.fields['controlled_money_account'].queryset = qs.filter(is_active=True)
+        self.fields['controlled_money_account'].required = True
         self.fields['controlled_money_account'].label = 'Controlled Money Account credited'
-        self.helper = FormHelper(); self.helper.form_tag = False; self.helper.add_input(Submit('submit', 'Create Controlled Money Receipt'))
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.add_input(Submit('submit', 'Create Controlled Money Receipt'))
+
+    def clean_controlled_money_account(self):
+        account = self.cleaned_data.get('controlled_money_account')
+        if not account:
+            raise forms.ValidationError('Controlled money account is required before issuing a controlled money receipt.')
+        if self.user and self.user.firm_id and account.firm_id != self.user.firm_id:
+            raise forms.ValidationError('Controlled money account must belong to your firm.')
+        return account
 
     def save(self, commit=True):
         obj = super().save(commit=False)
-        obj.firm = self.user.firm
+        if self.user and self.user.firm_id:
+            obj.firm = self.user.firm
         obj.made_out_by = self.user
         if commit:
             obj.save()
+            self.save_m2m()
         return obj
 
 

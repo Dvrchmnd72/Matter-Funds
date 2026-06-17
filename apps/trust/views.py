@@ -842,7 +842,7 @@ class ControlledMoneyMonthlyStatementDetailView(AdminOrAccountantMixin, DetailVi
     model=ControlledMoneyMonthlyStatement; template_name='trust/controlled_money/statement_detail.html'; context_object_name='statement'
     def get_queryset(self): return scope_trust_queryset_for_user(ControlledMoneyMonthlyStatement.objects.select_related('firm','reviewed_by'), self.request.user, firm_lookup='firm')
     def get_context_data(self, **kwargs):
-        ctx=super().get_context_data(**kwargs); ctx['accounts']=ControlledMoneyAccount.objects.filter(firm=self.object.firm, opened_on__lte=self.object.period_end); ctx['review_form']=ControlledMoneyPrincipalReviewForm(instance=self.object); return ctx
+        ctx=super().get_context_data(**kwargs); ctx['accounts']=ControlledMoneyAccount.objects.filter(firm=self.object.firm, opened_on__lte=self.object.period_end).filter(Q(closed_on__isnull=True)|Q(closed_on__gte=self.object.period_end)).order_by('account_name'); ctx['review_form']=ControlledMoneyPrincipalReviewForm(instance=self.object); return ctx
     def post(self, request, pk):
         self.object=self.get_object(); form=ControlledMoneyPrincipalReviewForm(request.POST, instance=self.object)
         if form.is_valid():
