@@ -20,6 +20,7 @@
         <li class="nav-item"><a class="nav-link" href="/matters/">Matters</a></li>
         <li class="nav-item"><a class="nav-link" href="/clients/">Clients</a></li>
         <li class="nav-item"><a class="nav-link" href="/trust/accounts/">Trust Accounts</a></li>
+        {% if request.user.role == 'admin' or request.user.role == 'accountant' %}<li class="nav-item"><a class="nav-link" href="/trust/controlled-money/">Controlled Money</a></li>{% endif %}
         <li class="nav-item"><a class="nav-link" href="/trust/reconciliations/">Reconciliations</a></li>
         <li class="nav-item"><a class="nav-link" href="/trust/reports/">Reports</a></li>
         <li class="nav-item"><a class="nav-link" href="/trust/irregularities/">Irregularities</a></li>

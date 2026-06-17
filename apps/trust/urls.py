@@ -3,6 +3,16 @@ from . import views
 
 app_name = 'trust'
 urlpatterns = [
+
+    path('controlled-money/', views.ControlledMoneyAccountListView.as_view(), name='controlled_money_list'),
+    path('controlled-money/accounts/new/', views.ControlledMoneyAccountCreateView.as_view(), name='controlled_money_create'),
+    path('controlled-money/accounts/<int:pk>/', views.ControlledMoneyAccountDetailView.as_view(), name='controlled_money_detail'),
+    path('controlled-money/receipts/new/', views.ControlledMoneyReceiptCreateView.as_view(), name='controlled_money_receipt_create'),
+    path('controlled-money/receipts/<int:pk>/pdf/', views.ControlledMoneyReceiptPDFView.as_view(), name='controlled_money_receipt_pdf'),
+    path('controlled-money/withdrawals/new/', views.ControlledMoneyWithdrawalCreateView.as_view(), name='controlled_money_withdrawal_create'),
+    path('controlled-money/monthly-statements/', views.ControlledMoneyMonthlyStatementListView.as_view(), name='controlled_money_statements'),
+    path('controlled-money/monthly-statements/<int:pk>/', views.ControlledMoneyMonthlyStatementDetailView.as_view(), name='controlled_money_statement_detail'),
+    path('controlled-money/monthly-statements/<int:pk>/pdf/', views.ControlledMoneyMonthlyStatementPDFView.as_view(), name='controlled_money_statement_pdf'),
     path('accounts/', views.TrustAccountListView.as_view(), name='account_list'),
     path('accounts/<int:pk>/', views.TrustAccountDetailView.as_view(), name='account_detail'),
     path('ledgers/<int:ledger_pk>/receipts/new/', views.ReceiptCreateView.as_view(), name='receipt_create'),

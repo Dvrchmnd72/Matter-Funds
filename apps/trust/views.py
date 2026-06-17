@@ -16,11 +16,14 @@ from apps.trust import reports as trust_reports
 from .models import (
     TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment,
     MonthlyReconciliation, Irregularity, TrustAccountingPeriod, TrustMonthlyRecord,
+    ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement,
 )
 from .forms import (
     ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm,
     ManualIrregularityForm, IrregularityResolveForm, DateRangeForm, YearForm,
     ReconciliationFinaliseForm, AccountingPeriodLockForm, ReconciliationBankStatementForm,
+    ControlledMoneyAccountForm, ControlledMoneyReceiptForm, ControlledMoneyWithdrawalForm,
+    ControlledMoneyMonthlyStatementForm, ControlledMoneyPrincipalReviewForm,
 )
 
 
@@ -771,3 +774,82 @@ class ReceiptPDFView(StaffRequiredMixin, View):
             pk=pk,
         )
         return trust_reports.receipt_pdf(receipt)
+
+class ControlledMoneyAccountListView(AdminOrAccountantMixin, ListView):
+    model = ControlledMoneyAccount
+    template_name = 'trust/controlled_money/account_list.html'
+    context_object_name = 'accounts'
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(ControlledMoneyAccount.objects.select_related('firm','client','matter'), self.request.user, firm_lookup='firm').order_by('account_name')
+
+class ControlledMoneyAccountCreateView(AdminOrAccountantMixin, CreateView):
+    model = ControlledMoneyAccount
+    form_class = ControlledMoneyAccountForm
+    template_name = 'trust/controlled_money/form.html'
+    def get_form_kwargs(self):
+        kw=super().get_form_kwargs(); kw['user']=self.request.user; return kw
+    def get_success_url(self): return reverse('trust:controlled_money_detail', kwargs={'pk': self.object.pk})
+
+class ControlledMoneyAccountDetailView(AdminOrAccountantMixin, DetailView):
+    model = ControlledMoneyAccount
+    template_name = 'trust/controlled_money/detail.html'
+    context_object_name = 'account'
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(ControlledMoneyAccount.objects.select_related('firm','client','matter'), self.request.user, firm_lookup='firm')
+    def get_context_data(self, **kwargs):
+        ctx=super().get_context_data(**kwargs); a=self.object
+        receipts=list(a.receipts.order_by('date_made_out','receipt_number')); withdrawals=list(a.withdrawals.order_by('date','created_at'))
+        movements=[]
+        for r in receipts: movements.append((r.date_money_received or r.date_made_out, f'Receipt #{r.receipt_number}', r.amount, None, r.reason))
+        for w in withdrawals: movements.append((w.date, f'Withdrawal {w.transaction_number}', None, w.amount, w.reason))
+        bal=0; rows=[]
+        for d,label,credit,debit,reason in sorted(movements, key=lambda x:(x[0], x[1])):
+            bal += credit or 0; bal -= debit or 0; rows.append({'date':d,'label':label,'credit':credit,'debit':debit,'balance':bal,'reason':reason})
+        ctx.update(receipts=receipts, withdrawals=withdrawals, movements=rows, documents=a.supporting_documents.all())
+        return ctx
+
+class ControlledMoneyReceiptCreateView(AdminOrAccountantMixin, CreateView):
+    model = ControlledMoneyReceipt; form_class = ControlledMoneyReceiptForm; template_name='trust/controlled_money/form.html'
+    def get_form_kwargs(self): kw=super().get_form_kwargs(); kw['user']=self.request.user; return kw
+    def form_valid(self, form):
+        messages.success(self.request, 'Controlled Money Receipt created.')
+        return super().form_valid(form)
+    def get_success_url(self): return reverse('trust:controlled_money_receipt_pdf', kwargs={'pk': self.object.pk})
+
+class ControlledMoneyWithdrawalCreateView(AdminOrAccountantMixin, CreateView):
+    model = ControlledMoneyWithdrawal; form_class = ControlledMoneyWithdrawalForm; template_name='trust/controlled_money/form.html'
+    def get_form_kwargs(self): kw=super().get_form_kwargs(); kw['user']=self.request.user; return kw
+    def get_success_url(self): return reverse('trust:controlled_money_detail', kwargs={'pk': self.object.controlled_money_account_id})
+
+class ControlledMoneyReceiptPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, pk):
+        receipt=get_object_or_404(scope_trust_queryset_for_user(ControlledMoneyReceipt.objects.select_related('firm','controlled_money_account','made_out_by'), request.user, firm_lookup='firm'), pk=pk)
+        return trust_reports._pdf_response_from_bytes(f'controlled_money_receipt_{receipt.receipt_number}.pdf', trust_reports.controlled_money_receipt_pdf_bytes(receipt))
+
+class ControlledMoneyMonthlyStatementListView(AdminOrAccountantMixin, ListView):
+    model=ControlledMoneyMonthlyStatement; template_name='trust/controlled_money/statements.html'; context_object_name='statements'
+    def get_queryset(self): return scope_trust_queryset_for_user(ControlledMoneyMonthlyStatement.objects.select_related('firm','reviewed_by'), self.request.user, firm_lookup='firm').order_by('-period_end')
+    def get_context_data(self, **kwargs): ctx=super().get_context_data(**kwargs); ctx['form']=ControlledMoneyMonthlyStatementForm(); return ctx
+    def post(self, request):
+        form=ControlledMoneyMonthlyStatementForm(request.POST)
+        if form.is_valid():
+            st,created=ControlledMoneyMonthlyStatement.objects.get_or_create(firm=request.user.firm, period_end=form.cleaned_data['period_end'], defaults={'prepared_on': timezone.localdate()})
+            trust_reports.ensure_controlled_money_monthly_statement_pdf(st)
+            return redirect('trust:controlled_money_statement_detail', pk=st.pk)
+        return render(request, self.template_name, {'form':form, 'statements': self.get_queryset()})
+
+class ControlledMoneyMonthlyStatementDetailView(AdminOrAccountantMixin, DetailView):
+    model=ControlledMoneyMonthlyStatement; template_name='trust/controlled_money/statement_detail.html'; context_object_name='statement'
+    def get_queryset(self): return scope_trust_queryset_for_user(ControlledMoneyMonthlyStatement.objects.select_related('firm','reviewed_by'), self.request.user, firm_lookup='firm')
+    def get_context_data(self, **kwargs):
+        ctx=super().get_context_data(**kwargs); ctx['accounts']=ControlledMoneyAccount.objects.filter(firm=self.object.firm, opened_on__lte=self.object.period_end); ctx['review_form']=ControlledMoneyPrincipalReviewForm(instance=self.object); return ctx
+    def post(self, request, pk):
+        self.object=self.get_object(); form=ControlledMoneyPrincipalReviewForm(request.POST, instance=self.object)
+        if form.is_valid():
+            st=form.save(commit=False); st.reviewed_by=request.user; st.reviewed_on=timezone.localdate(); st.pdf.delete(save=False); st.save(); trust_reports.ensure_controlled_money_monthly_statement_pdf(st); return redirect('trust:controlled_money_statement_detail', pk=st.pk)
+        return render(request, self.template_name, self.get_context_data(review_form=form))
+
+class ControlledMoneyMonthlyStatementPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, pk):
+        st=get_object_or_404(scope_trust_queryset_for_user(ControlledMoneyMonthlyStatement.objects.select_related('firm'), request.user, firm_lookup='firm'), pk=pk)
+        return trust_reports._pdf_response_from_bytes(f'controlled_money_statement_{st.period_end}.pdf', trust_reports.ensure_controlled_money_monthly_statement_pdf(st))
