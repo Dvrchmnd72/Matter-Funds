@@ -788,6 +788,10 @@ class ControlledMoneyAccountCreateView(AdminOrAccountantMixin, CreateView):
     template_name = 'trust/controlled_money/form.html'
     def get_form_kwargs(self):
         kw=super().get_form_kwargs(); kw['user']=self.request.user; return kw
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['form_title'] = 'New Controlled Money Account'
+        return ctx
     def get_success_url(self): return reverse('trust:controlled_money_detail', kwargs={'pk': self.object.pk})
 
 class ControlledMoneyAccountDetailView(AdminOrAccountantMixin, DetailView):
@@ -811,14 +815,24 @@ class ControlledMoneyAccountDetailView(AdminOrAccountantMixin, DetailView):
 class ControlledMoneyReceiptCreateView(AdminOrAccountantMixin, CreateView):
     model = ControlledMoneyReceipt; form_class = ControlledMoneyReceiptForm; template_name='trust/controlled_money/form.html'
     def get_form_kwargs(self): kw=super().get_form_kwargs(); kw['user']=self.request.user; return kw
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['form_title'] = 'New Controlled Money Receipt'
+        return ctx
     def form_valid(self, form):
-        messages.success(self.request, 'Controlled Money Receipt created.')
-        return super().form_valid(form)
-    def get_success_url(self): return reverse('trust:controlled_money_receipt_pdf', kwargs={'pk': self.object.pk})
+        response = super().form_valid(form)
+        messages.success(self.request, f'Controlled Money Receipt #{self.object.receipt_number} created. Download the PDF from the register below.')
+        return response
+    def get_success_url(self):
+        return reverse('trust:controlled_money_detail', kwargs={'pk': self.object.controlled_money_account_id})
 
 class ControlledMoneyWithdrawalCreateView(AdminOrAccountantMixin, CreateView):
     model = ControlledMoneyWithdrawal; form_class = ControlledMoneyWithdrawalForm; template_name='trust/controlled_money/form.html'
     def get_form_kwargs(self): kw=super().get_form_kwargs(); kw['user']=self.request.user; return kw
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['form_title'] = 'New Controlled Money Withdrawal'
+        return ctx
     def get_success_url(self): return reverse('trust:controlled_money_detail', kwargs={'pk': self.object.controlled_money_account_id})
 
 class ControlledMoneyReceiptPDFView(AdminOrAccountantMixin, View):
