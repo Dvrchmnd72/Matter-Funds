@@ -68,7 +68,11 @@ class ControlledMoneyAccount(models.Model):
         verbose_name_plural = 'Controlled Money Accounts'
 
     def __str__(self):
-        return f"Controlled Money \u2013 {self.client} ({self.bsb} {self.account_number})"
+        display_name = self.account_name or "Controlled Money Account"
+        account_bits = " ".join(part for part in [self.bsb, self.account_number] if part)
+        if account_bits:
+            return f"{display_name} ({account_bits})"
+        return display_name
 
     def clean(self):
         errors = {}
