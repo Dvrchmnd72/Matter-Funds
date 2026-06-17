@@ -5,6 +5,7 @@ import datetime
 from decimal import Decimal
 
 from django.http import HttpResponse
+from django.db.models import Q
 from django.utils import timezone
 
 try:
@@ -23,7 +24,7 @@ try:
 except ImportError:
     HAS_OPENPYXL = False
 
-from .models import TrustTransaction, MatterLedger, MonthlyReconciliation, Irregularity, TrustJournal
+from .models import TrustTransaction, MatterLedger, MonthlyReconciliation, Irregularity, TrustJournal, TrustAccount
 
 
 FOOTER_TEXT = "Prepared from Matter Funds \u2014 refer to LPUGR Part 4.2"
@@ -228,7 +229,7 @@ def matter_ledger_statement_pdf(matter_ledger):
             str(running),
         ])
 
-    _build_pdf_document(buffer, trust_account, f'Matter Ledger Statement \u2013 {matter_ledger.matter}',
+    _build_pdf_document(buffer, trust_account, 'Matter Ledger Statement',
                         f"As at {datetime.date.today()}", rows, col_headers)
     response = _make_pdf_response(f'ledger_statement_{matter_ledger.pk}.pdf')
     response.write(buffer.getvalue())
@@ -468,3 +469,119 @@ def receipt_pdf(receipt):
     response = _make_pdf_response(f'receipt_{receipt.receipt_number}.pdf')
     response.write(buffer.getvalue())
     return response
+
+import hashlib
+import json
+from django.core.files.base import ContentFile
+from .models import ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, TrustMonthlyRecord, TrustAccountingPeriod
+
+
+def _date_range_for_ledger(matter_ledger, date_from=None, date_to=None):
+    qs = TrustTransaction.objects.filter(matter_ledger=matter_ledger)
+    if date_from is None:
+        first = qs.order_by('date_received_or_paid').values_list('date_received_or_paid', flat=True).first()
+        date_from = first or datetime.date(timezone.localdate().year if timezone.localdate().month >= 7 else timezone.localdate().year - 1, 7, 1)
+    if date_to is None:
+        date_to = timezone.localdate()
+    return date_from, date_to
+
+
+def trust_account_statement_rows(matter_ledger, date_from=None, date_to=None):
+    date_from, date_to = _date_range_for_ledger(matter_ledger, date_from, date_to)
+    all_txns = TrustTransaction.objects.filter(matter_ledger=matter_ledger).select_related('reverses').order_by('date_received_or_paid', 'created_at', 'pk')
+    opening = Decimal('0.00')
+    for txn in all_txns.filter(date_received_or_paid__lt=date_from):
+        opening += _transaction_delta(txn)
+    running = opening
+    rows = []
+    receipts = payments = journals = Decimal('0.00')
+    for txn in all_txns.filter(date_received_or_paid__range=(date_from, date_to)):
+        delta = _transaction_delta(txn)
+        running += delta
+        debit = -delta if delta < 0 else Decimal('0.00')
+        credit = delta if delta > 0 else Decimal('0.00')
+        if txn.transaction_type == 'receipt': receipts += credit
+        elif txn.transaction_type in ('payment', 'transfer_to_office'): payments += debit
+        elif txn.transaction_type in ('journal_in', 'journal_out'): journals += abs(delta)
+        rows.append([str(txn.date_received_or_paid), txn.get_transaction_type_display(), txn.description, str(debit or ''), str(credit or ''), str(running)])
+    return date_from, date_to, opening, receipts, payments, journals, running, rows
+
+
+def trust_account_statement_pdf_bytes(matter_ledger, date_from=None, date_to=None):
+    date_from, date_to, opening, receipts, payments, journals, closing, rows = trust_account_statement_rows(matter_ledger, date_from, date_to)
+    buffer = io.BytesIO(); styles = getSampleStyleSheet()
+    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+    matter = matter_ledger.matter; account = matter_ledger.trust_account
+    elements = [Paragraph('Trust Account Statement', styles['Heading1'])]
+    for line in _build_header_info(account): elements.append(Paragraph(line, styles['Normal']))
+    elements += [Paragraph(f'Client/person: {matter.client.name}', styles['Normal']), Paragraph(f'Matter reference: {matter.file_number}', styles['Normal']), Paragraph(f'Matter description: {matter.description}', styles['Normal']), Paragraph(f'Statement period: {date_from} to {date_to}', styles['Normal']), Paragraph(f'Date statement prepared/generated: {timezone.localdate()}', styles['Normal']), Spacer(1, .4*cm)]
+    elements.append(Table([['Opening balance', str(opening)], ['Receipts', str(receipts)], ['Payments', str(payments)], ['Transfers/journals affecting ledger', str(journals)], ['Closing balance', str(closing)]], style=[('GRID',(0,0),(-1,-1),.5,colors.black)]))
+    elements.append(Spacer(1, .4*cm))
+    t = Table([['Date','Type','Description','Debit ($)','Credit ($)','Running balance ($)']] + rows, repeatRows=1)
+    t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.grey),('GRID',(0,0),(-1,-1),.5,colors.black),('FONTSIZE',(0,0),(-1,-1),8)]))
+    elements.append(t); elements.append(Spacer(1,.4*cm)); elements.append(Paragraph(FOOTER_TEXT, styles['Italic']))
+    doc.build(elements); return buffer.getvalue()
+
+
+def trust_account_statement_pdf(matter_ledger, date_from=None, date_to=None):
+    date_from, date_to = _date_range_for_ledger(matter_ledger, date_from, date_to)
+    return _pdf_response_from_bytes(f'trust_account_statement_{matter_ledger.pk}_{date_from}_{date_to}.pdf', trust_account_statement_pdf_bytes(matter_ledger, date_from, date_to))
+
+
+def controlled_money_receipt_pdf_bytes(receipt):
+    buffer = io.BytesIO(); rows = [['Expression','controlled money receipt'], ['Law practice name', receipt.firm.name], ['Receipt number', str(receipt.receipt_number)], ['Date made out', str(receipt.date_made_out)], ['Date money received', str(receipt.date_money_received or receipt.date_made_out)], ['Amount', str(receipt.amount)], ['Form/payment method', receipt.get_payment_method_display()], ['From', receipt.person_from_whom_received], ['On behalf of', receipt.person_on_behalf], ['Matter reference', receipt.matter_reference], ['Matter description', receipt.matter_description], ['Reason/purpose', receipt.reason], ['Account credited', str(receipt.controlled_money_account or '')], ['Made out by', str(receipt.made_out_by)]]
+    _build_pdf_document(buffer, receipt.controlled_money_account or TrustAccount.objects.filter(firm=receipt.firm).first(), 'Controlled Money Receipt', str(receipt.date_made_out), rows, ['Field','Value'])
+    return buffer.getvalue()
+
+
+def controlled_money_monthly_statement_pdf_bytes(statement):
+    accounts = ControlledMoneyAccount.objects.filter(firm=statement.firm, opened_on__lte=statement.period_end).filter(Q(closed_on__isnull=True)|Q(closed_on__gte=statement.period_end)).order_by('account_name')
+    rows = [[a.account_name, a.account_number, str(a.current_balance), a.person_on_behalf, a.matter_description] for a in accounts]
+    rows += [['Date statement prepared', str(statement.prepared_on), '', '', ''], ['Due date (15 NSW working days)', str(statement.due_date), '', '', ''], ['Reviewed by', str(statement.reviewed_by or ''), str(statement.reviewed_on or ''), statement.reviewer_role_confirmation, statement.review_note]]
+    buffer = io.BytesIO(); _build_pdf_document(buffer, accounts.first() or TrustAccount.objects.filter(firm=statement.firm).first(), 'Controlled Money Monthly Statement – in progress', f'As at {statement.period_end}', rows, ['Account name','Account number','Register balance','Person on behalf','Matter description'])
+    return buffer.getvalue()
+
+
+def ensure_controlled_money_monthly_statement_pdf(statement):
+    if not statement.pdf:
+        data = controlled_money_monthly_statement_pdf_bytes(statement); statement.sha256_hash = hashlib.sha256(data).hexdigest(); statement.pdf.save(f'controlled_money_statement_{statement.period_end}.pdf', ContentFile(data), save=False); statement.save()
+    return statement.pdf.read()
+
+
+def trust_records_export_pack_zip(trust_account, date_from=None, date_to=None, year=None, all_data=False):
+    if year and not (date_from or date_to): date_from, date_to = datetime.date(year,1,1), datetime.date(year,12,31)
+    if all_data: date_from, date_to = datetime.date(1900,1,1), timezone.localdate()
+    date_from = date_from or datetime.date(timezone.localdate().year,1,1); date_to = date_to or timezone.localdate()
+    buf=io.BytesIO(); manifest=[]
+    def add(zf, name, data, source):
+        if isinstance(data, str):
+            data = data.encode()
+        h = hashlib.sha256(data).hexdigest()
+        zf.writestr(name, data)
+        manifest.append({'path': name, 'sha256': h, 'source': source})
+    with zipfile.ZipFile(buf,'w',zipfile.ZIP_DEFLATED) as zf:
+        for rec in TrustMonthlyRecord.objects.filter(trust_account=trust_account, accounting_period__period_end__range=(date_from,date_to)):
+            if rec.pdf: add(zf, f'retained-monthly-records/{rec.accounting_period.period_end}/{rec.record_type}.pdf', rec.pdf.read(), 'retained')
+        add(zf,'live-generated/receipts_cash_book.pdf',receipts_cash_book_pdf_bytes(trust_account,date_from,date_to),'live-generated')
+        add(zf,'live-generated/payments_cash_book.pdf',payments_cash_book_pdf_bytes(trust_account,date_from,date_to),'live-generated')
+        add(zf,'live-generated/trust_transfer_journal.pdf',trust_transfer_journal_pdf_bytes(trust_account,date_from,date_to),'live-generated')
+        add(zf,'live-generated/trial_balance.pdf',trial_balance_pdf_bytes(trust_account,date_to),'live-generated')
+        for ledger in MatterLedger.objects.filter(trust_account=trust_account).select_related('matter__client','trust_account__firm'):
+            add(zf,f'live-generated/matter-ledgers/ledger_{ledger.pk}.pdf', matter_ledger_statement_pdf(ledger).content, 'live-generated')
+            add(zf,f'live-generated/trust-account-statements/statement_{ledger.pk}.pdf', trust_account_statement_pdf_bytes(ledger,date_from,date_to),'live-generated')
+        for recon in MonthlyReconciliation.objects.filter(trust_account=trust_account, period_end__range=(date_from,date_to)):
+            add(zf,f'live-generated/reconciliations/reconciliation_{recon.period_end}.pdf',reconciliation_statement_pdf_bytes(recon),'live-generated')
+            if recon.bank_statement_pdf: add(zf,f'evidence/bank-statements/{recon.bank_statement_pdf.name.split("/")[-1]}',recon.bank_statement_pdf.read(),'stored-evidence')
+        for st in ControlledMoneyMonthlyStatement.objects.filter(firm=trust_account.firm, period_end__range=(date_from,date_to)):
+            add(zf,f'controlled-money/monthly-statements/{st.period_end}.pdf',ensure_controlled_money_monthly_statement_pdf(st),'permanent-controlled-money-record')
+        txns=list(TrustTransaction.objects.filter(matter_ledger__trust_account=trust_account, date_received_or_paid__range=(date_from,date_to)).values('id','transaction_type','amount','date_received_or_paid','description','matter_ledger_id'))
+        add(zf,'exports/trust_transactions.json',json.dumps(txns,default=str,indent=2),'export')
+        csvbuf=io.StringIO(); w=csv.DictWriter(csvbuf, fieldnames=['id','transaction_type','amount','date_received_or_paid','description','matter_ledger_id']); w.writeheader(); [w.writerow(t) for t in txns]; add(zf,'exports/trust_transactions.csv',csvbuf.getvalue(),'export')
+        ledgers=list(MatterLedger.objects.filter(trust_account=trust_account).values('id','matter_id','balance')); add(zf,'exports/matter_ledgers.json',json.dumps(ledgers,default=str,indent=2),'export')
+        add(zf,'exports/reconciliations.json',json.dumps(list(MonthlyReconciliation.objects.filter(trust_account=trust_account).values()),default=str,indent=2),'export')
+        add(zf,'exports/monthly_records.json',json.dumps(list(TrustMonthlyRecord.objects.filter(trust_account=trust_account).values('id','record_type','sha256_hash','generated_at')),default=str,indent=2),'export')
+        add(zf,'exports/accounting_periods.json',json.dumps(list(TrustAccountingPeriod.objects.filter(trust_account=trust_account).values()),default=str,indent=2),'export')
+        add(zf,'exports/irregularities.json',json.dumps(list(Irregularity.objects.filter(trust_account=trust_account).values()),default=str,indent=2),'export')
+        add(zf,'manifest.json',json.dumps(manifest,indent=2),'manifest')
+        hash_lines='\n'.join(f"{m['sha256']}  {m['path']}" for m in manifest); add(zf,'SHA256SUMS.txt',hash_lines,'manifest')
+    return HttpResponse(buf.getvalue(), content_type='application/zip', headers={'Content-Disposition': f'attachment; filename="trust_records_export_pack_{date_from}_{date_to}.zip"'})
