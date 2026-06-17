@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
+from django.core.files.base import ContentFile
 from django.test import TestCase
 
 from apps.clients.models import Client
@@ -14,7 +15,8 @@ from apps.matters.models import Matter
 from apps.trust import reports as trust_reports
 from apps.trust.models import (
     ControlledMoneyAccount, ControlledMoneyMonthlyStatement, ControlledMoneyReceipt,
-    ControlledMoneyWithdrawal, MatterLedger, TrustAccount,
+    ControlledMoneyWithdrawal, MatterLedger, MonthlyReconciliation, TrustAccount,
+    TrustAccountingPeriod, TrustMonthlyRecord,
 )
 from apps.trust.services import create_payment, create_receipt
 
@@ -52,6 +54,48 @@ class Section5TrustRecordCompletenessTests(TestCase):
         with patch.object(trust_reports, '_build_pdf_document', side_effect=lambda buffer, *args, **kwargs: buffer.write(b'pdf')):
             self.assertEqual(trust_reports.trust_account_statement_pdf_bytes(self.ledger, datetime.date(2024, 1, 1), datetime.date(2024, 1, 31)), b'pdf')
 
+    def test_export_pack_uses_retained_monthly_records_without_duplicate_generated_reports(self):
+        period = TrustAccountingPeriod.objects.create(
+            trust_account=self.trust,
+            period_start=datetime.date(2024, 3, 1),
+            period_end=datetime.date(2024, 3, 31),
+            status='closed',
+            closed_by=self.admin,
+        )
+        reconciliation = MonthlyReconciliation.objects.create(
+            trust_account=self.trust,
+            accounting_period=period,
+            period_end=datetime.date(2024, 3, 31),
+            cash_book_balance=Decimal('0.00'),
+            ledger_total_balance=Decimal('0.00'),
+            bank_statement_balance=Decimal('0.00'),
+            is_reconciled=True,
+        )
+        for record_type in (
+            TrustMonthlyRecord.RECORD_RECONCILIATION_STATEMENT,
+            TrustMonthlyRecord.RECORD_TRIAL_BALANCE,
+        ):
+            record = TrustMonthlyRecord.objects.create(
+                accounting_period=period,
+                reconciliation=reconciliation,
+                trust_account=self.trust,
+                record_type=record_type,
+                generated_by=self.admin,
+                sha256_hash='0' * 64,
+            )
+            record.pdf.save(f'{record_type}_2024-03-31.pdf', ContentFile(b'%PDF retained'), save=True)
+
+        with patch.object(trust_reports, 'trial_balance_pdf_bytes', side_effect=AssertionError('must not regenerate trial balance')), \
+             patch.object(trust_reports, 'reconciliation_statement_pdf_bytes', side_effect=AssertionError('must not regenerate reconciliation')), \
+             patch.object(trust_reports, '_build_pdf_document', side_effect=lambda buffer, *args, **kwargs: buffer.write(b'pdf')):
+            response = trust_reports.trust_records_export_pack_zip(self.trust, datetime.date(2024, 3, 1), datetime.date(2024, 3, 31))
+
+        names = zipfile.ZipFile(io.BytesIO(response.content)).namelist()
+        self.assertIn('retained-monthly-records/2024-03-31/reconciliation_statement.pdf', names)
+        self.assertIn('retained-monthly-records/2024-03-31/trial_balance.pdf', names)
+        self.assertNotIn('generated-reports/reconciliations/reconciliation_2024-03-31.pdf', names)
+        self.assertNotIn('generated-reports/trial_balance.pdf', names)
+
     def test_cma_validation_receipt_sequence_and_withdrawal_controls(self):
         with self.assertRaises(ValidationError):
             ControlledMoneyAccount.objects.create(firm=self.firm, client=self.client, account_name='Jane savings', bank='Bank', bsb='012-345', account_number='1', purpose='Land')
@@ -73,7 +117,8 @@ class Section5TrustRecordCompletenessTests(TestCase):
             response = trust_reports.trust_records_export_pack_zip(self.trust, datetime.date(2024, 3, 1), datetime.date(2024, 3, 31))
         zf = zipfile.ZipFile(io.BytesIO(response.content))
         names = zf.namelist()
-        self.assertIn('manifest.json', names)
-        self.assertIn('SHA256SUMS.txt', names)
+        self.assertIn('README.txt', names)
+        self.assertNotIn('manifest.json', names)
+        self.assertNotIn('SHA256SUMS.txt', names)
         self.assertIn('controlled-money/monthly-statements/2024-03-31.pdf', names)
-        self.assertIn('exports/trust_transactions.json', names)
+        self.assertIn('exports/trust_transactions.csv', names)

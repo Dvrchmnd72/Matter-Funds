@@ -548,40 +548,101 @@ def ensure_controlled_money_monthly_statement_pdf(statement):
     return statement.pdf.read()
 
 
-def trust_records_export_pack_zip(trust_account, date_from=None, date_to=None, year=None, all_data=False):
-    if year and not (date_from or date_to): date_from, date_to = datetime.date(year,1,1), datetime.date(year,12,31)
-    if all_data: date_from, date_to = datetime.date(1900,1,1), timezone.localdate()
-    date_from = date_from or datetime.date(timezone.localdate().year,1,1); date_to = date_to or timezone.localdate()
-    buf=io.BytesIO(); manifest=[]
+def trust_records_export_pack_zip(trust_account, date_from=None, date_to=None, year=None, all_data=False, include_technical=False):
+    if year and not (date_from or date_to):
+        date_from, date_to = datetime.date(year, 1, 1), datetime.date(year, 12, 31)
+    if all_data:
+        date_from, date_to = datetime.date(1900, 1, 1), timezone.localdate()
+    date_from = date_from or datetime.date(timezone.localdate().year, 1, 1)
+    date_to = date_to or timezone.localdate()
+    buf = io.BytesIO()
+    manifest = []
+    included_files = []
+
     def add(zf, name, data, source):
         if isinstance(data, str):
             data = data.encode()
-        h = hashlib.sha256(data).hexdigest()
         zf.writestr(name, data)
-        manifest.append({'path': name, 'sha256': h, 'source': source})
-    with zipfile.ZipFile(buf,'w',zipfile.ZIP_DEFLATED) as zf:
-        for rec in TrustMonthlyRecord.objects.filter(trust_account=trust_account, accounting_period__period_end__range=(date_from,date_to)):
-            if rec.pdf: add(zf, f'retained-monthly-records/{rec.accounting_period.period_end}/{rec.record_type}.pdf', rec.pdf.read(), 'retained')
-        add(zf,'live-generated/receipts_cash_book.pdf',receipts_cash_book_pdf_bytes(trust_account,date_from,date_to),'live-generated')
-        add(zf,'live-generated/payments_cash_book.pdf',payments_cash_book_pdf_bytes(trust_account,date_from,date_to),'live-generated')
-        add(zf,'live-generated/trust_transfer_journal.pdf',trust_transfer_journal_pdf_bytes(trust_account,date_from,date_to),'live-generated')
-        add(zf,'live-generated/trial_balance.pdf',trial_balance_pdf_bytes(trust_account,date_to),'live-generated')
-        for ledger in MatterLedger.objects.filter(trust_account=trust_account).select_related('matter__client','trust_account__firm'):
-            add(zf,f'live-generated/matter-ledgers/ledger_{ledger.pk}.pdf', matter_ledger_statement_pdf(ledger).content, 'live-generated')
-            add(zf,f'live-generated/trust-account-statements/statement_{ledger.pk}.pdf', trust_account_statement_pdf_bytes(ledger,date_from,date_to),'live-generated')
-        for recon in MonthlyReconciliation.objects.filter(trust_account=trust_account, period_end__range=(date_from,date_to)):
-            add(zf,f'live-generated/reconciliations/reconciliation_{recon.period_end}.pdf',reconciliation_statement_pdf_bytes(recon),'live-generated')
-            if recon.bank_statement_pdf: add(zf,f'evidence/bank-statements/{recon.bank_statement_pdf.name.split("/")[-1]}',recon.bank_statement_pdf.read(),'stored-evidence')
-        for st in ControlledMoneyMonthlyStatement.objects.filter(firm=trust_account.firm, period_end__range=(date_from,date_to)):
-            add(zf,f'controlled-money/monthly-statements/{st.period_end}.pdf',ensure_controlled_money_monthly_statement_pdf(st),'permanent-controlled-money-record')
-        txns=list(TrustTransaction.objects.filter(matter_ledger__trust_account=trust_account, date_received_or_paid__range=(date_from,date_to)).values('id','transaction_type','amount','date_received_or_paid','description','matter_ledger_id'))
-        add(zf,'exports/trust_transactions.json',json.dumps(txns,default=str,indent=2),'export')
-        csvbuf=io.StringIO(); w=csv.DictWriter(csvbuf, fieldnames=['id','transaction_type','amount','date_received_or_paid','description','matter_ledger_id']); w.writeheader(); [w.writerow(t) for t in txns]; add(zf,'exports/trust_transactions.csv',csvbuf.getvalue(),'export')
-        ledgers=list(MatterLedger.objects.filter(trust_account=trust_account).values('id','matter_id','balance')); add(zf,'exports/matter_ledgers.json',json.dumps(ledgers,default=str,indent=2),'export')
-        add(zf,'exports/reconciliations.json',json.dumps(list(MonthlyReconciliation.objects.filter(trust_account=trust_account).values()),default=str,indent=2),'export')
-        add(zf,'exports/monthly_records.json',json.dumps(list(TrustMonthlyRecord.objects.filter(trust_account=trust_account).values('id','record_type','sha256_hash','generated_at')),default=str,indent=2),'export')
-        add(zf,'exports/accounting_periods.json',json.dumps(list(TrustAccountingPeriod.objects.filter(trust_account=trust_account).values()),default=str,indent=2),'export')
-        add(zf,'exports/irregularities.json',json.dumps(list(Irregularity.objects.filter(trust_account=trust_account).values()),default=str,indent=2),'export')
-        add(zf,'manifest.json',json.dumps(manifest,indent=2),'manifest')
-        hash_lines='\n'.join(f"{m['sha256']}  {m['path']}" for m in manifest); add(zf,'SHA256SUMS.txt',hash_lines,'manifest')
+        included_files.append(name)
+        if include_technical:
+            manifest.append({'path': name, 'sha256': hashlib.sha256(data).hexdigest(), 'source': source})
+
+    def csv_export(zf, name, rows, fieldnames):
+        csvbuf = io.StringIO()
+        writer = csv.DictWriter(csvbuf, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+        add(zf, name, csvbuf.getvalue(), 'export')
+
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        stored_record_types = set()
+        retained_records = TrustMonthlyRecord.objects.filter(
+            trust_account=trust_account,
+            accounting_period__period_end__range=(date_from, date_to),
+        ).select_related('accounting_period')
+        for rec in retained_records:
+            if rec.pdf:
+                stored_record_types.add((rec.accounting_period.period_start, rec.accounting_period.period_end, rec.record_type))
+                add(zf, f'retained-monthly-records/{rec.accounting_period.period_end}/{rec.record_type}.pdf', rec.pdf.read(), 'retained')
+
+        exact_period_stored_types = {
+            record_type for start, end, record_type in stored_record_types
+            if start == date_from and end == date_to
+        }
+        if TrustMonthlyRecord.RECORD_RECEIPTS_CASH_BOOK not in exact_period_stored_types:
+            add(zf, 'generated-reports/receipts_cash_book.pdf', receipts_cash_book_pdf_bytes(trust_account, date_from, date_to), 'generated')
+        if TrustMonthlyRecord.RECORD_PAYMENTS_CASH_BOOK not in exact_period_stored_types:
+            add(zf, 'generated-reports/payments_cash_book.pdf', payments_cash_book_pdf_bytes(trust_account, date_from, date_to), 'generated')
+        if TrustMonthlyRecord.RECORD_TRUST_TRANSFER_JOURNAL not in exact_period_stored_types:
+            add(zf, 'generated-reports/trust_transfer_journal.pdf', trust_transfer_journal_pdf_bytes(trust_account, date_from, date_to), 'generated')
+        if TrustMonthlyRecord.RECORD_TRIAL_BALANCE not in exact_period_stored_types:
+            add(zf, 'generated-reports/trial_balance.pdf', trial_balance_pdf_bytes(trust_account, date_to), 'generated')
+
+        for ledger in MatterLedger.objects.filter(trust_account=trust_account).select_related('matter__client', 'trust_account__firm'):
+            add(zf, f'statements/matter-ledgers/ledger_{ledger.pk}.pdf', matter_ledger_statement_pdf(ledger).content, 'generated')
+            add(zf, f'statements/trust-account-statements/statement_{ledger.pk}.pdf', trust_account_statement_pdf_bytes(ledger, date_from, date_to), 'generated')
+
+        for recon in MonthlyReconciliation.objects.filter(trust_account=trust_account, period_end__range=(date_from, date_to)):
+            has_retained_recon = any(
+                end == recon.period_end and record_type == TrustMonthlyRecord.RECORD_RECONCILIATION_STATEMENT
+                for _start, end, record_type in stored_record_types
+            )
+            if not has_retained_recon:
+                add(zf, f'generated-reports/reconciliations/reconciliation_{recon.period_end}.pdf', reconciliation_statement_pdf_bytes(recon), 'generated')
+            if recon.bank_statement_pdf:
+                add(zf, f'evidence/bank-statements/{recon.bank_statement_pdf.name.split("/")[-1]}', recon.bank_statement_pdf.read(), 'stored-evidence')
+
+        for st in ControlledMoneyMonthlyStatement.objects.filter(firm=trust_account.firm, period_end__range=(date_from, date_to)):
+            add(zf, f'controlled-money/monthly-statements/{st.period_end}.pdf', ensure_controlled_money_monthly_statement_pdf(st), 'controlled-money-record')
+
+        txns = list(TrustTransaction.objects.filter(matter_ledger__trust_account=trust_account, date_received_or_paid__range=(date_from, date_to)).values('id', 'transaction_type', 'amount', 'date_received_or_paid', 'description', 'matter_ledger_id'))
+        csv_export(zf, 'exports/trust_transactions.csv', txns, ['id', 'transaction_type', 'amount', 'date_received_or_paid', 'description', 'matter_ledger_id'])
+        ledgers = list(MatterLedger.objects.filter(trust_account=trust_account).values('id', 'matter_id', 'balance'))
+        csv_export(zf, 'exports/matter_ledgers.csv', ledgers, ['id', 'matter_id', 'balance'])
+        recons = list(MonthlyReconciliation.objects.filter(trust_account=trust_account, period_end__range=(date_from, date_to)).values('id', 'period_end', 'bank_statement_balance', 'cash_book_balance', 'ledger_total_balance', 'reconciled_balance', 'is_reconciled'))
+        csv_export(zf, 'exports/reconciliations.csv', recons, ['id', 'period_end', 'bank_statement_balance', 'cash_book_balance', 'ledger_total_balance', 'reconciled_balance', 'is_reconciled'])
+
+        if include_technical:
+            add(zf, 'exports/trust_transactions.json', json.dumps(txns, default=str, indent=2), 'export')
+            add(zf, 'exports/matter_ledgers.json', json.dumps(ledgers, default=str, indent=2), 'export')
+            add(zf, 'exports/reconciliations.json', json.dumps(recons, default=str, indent=2), 'export')
+            add(zf, 'manifest.json', json.dumps(manifest, indent=2), 'manifest')
+            hash_lines = '\n'.join(f"{m['sha256']}  {m['path']}" for m in manifest)
+            add(zf, 'SHA256SUMS.txt', hash_lines, 'manifest')
+
+        readme_lines = [
+            'Trust Records Export Pack',
+            '',
+            f'Firm name: {trust_account.firm.name}',
+            f'Trust account name: {trust_account.name}',
+            f'Export date: {timezone.localdate()}',
+            f'Export period/year: {date_from} to {date_to}',
+            '',
+            'Retained monthly records are stored records generated at finalisation. Where a retained monthly record exists for a period/report type, this pack includes the stored PDF and omits a duplicate regenerated report for the same purpose.',
+            '',
+            'Folders/files included:',
+        ]
+        readme_lines.extend(f'- {name}' for name in sorted(included_files))
+        zf.writestr('README.txt', '\n'.join(readme_lines) + '\n')
     return HttpResponse(buf.getvalue(), content_type='application/zip', headers={'Content-Disposition': f'attachment; filename="trust_records_export_pack_{date_from}_{date_to}.zip"'})
