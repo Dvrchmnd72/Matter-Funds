@@ -164,6 +164,14 @@ class ControlledMoneyWithdrawal(models.Model):
     included_in_monthly_statement = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['controlled_money_account', 'transaction_number'],
+                name='unique_cma_withdrawal_transaction_number_per_account',
+            )
+        ]
+
     def clean(self):
         errors = {}
         if self.withdrawal_method not in {'cheque', 'eft'}:
@@ -174,6 +182,15 @@ class ControlledMoneyWithdrawal(models.Model):
             errors['destination_account_name'] = 'EFT withdrawals require destination account name, number and BSB.'
         if self.controlled_money_account_id and self.amount and self.amount > self.controlled_money_account.current_balance:
             errors['amount'] = 'Withdrawal cannot overdraw the controlled money account.'
+        if self.controlled_money_account_id and self.transaction_number:
+            duplicate_qs = type(self).objects.filter(
+                controlled_money_account_id=self.controlled_money_account_id,
+                transaction_number=self.transaction_number,
+            )
+            if self.pk:
+                duplicate_qs = duplicate_qs.exclude(pk=self.pk)
+            if duplicate_qs.exists():
+                errors['transaction_number'] = 'This controlled money withdrawal transaction number has already been used for this account.'
         if errors:
             raise ValidationError(errors)
 
