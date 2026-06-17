@@ -3,7 +3,9 @@ from django import forms
 from django.utils import timezone
 from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
-from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount, TrustAccountingPeriod
+from apps.clients.models import Client
+from apps.matters.models import Matter
+from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement
 
 
 class ReceiptForm(forms.Form):
@@ -283,3 +285,94 @@ class YearForm(forms.Form):
         self.helper = FormHelper()
         self.helper.form_method = 'get'
         self.helper.add_input(Submit('submit', 'Download Pack'))
+
+class ControlledMoneyAccountForm(forms.ModelForm):
+    class Meta:
+        model = ControlledMoneyAccount
+        fields = ['client', 'matter', 'account_name', 'bank', 'bsb', 'account_number', 'purpose', 'person_on_behalf', 'person_address', 'matter_reference', 'matter_description', 'opened_on', 'is_active', 'closed_on']
+        widgets = {'opened_on': forms.DateInput(attrs={'type': 'date'}), 'closed_on': forms.DateInput(attrs={'type': 'date'}), 'purpose': forms.Textarea(attrs={'rows': 3}), 'person_address': forms.Textarea(attrs={'rows': 3})}
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        if self.user and self.user.firm_id and self.user.role != 'admin':
+            self.fields['client'].queryset = Client.objects.filter(firm=self.user.firm)
+            self.fields['matter'].queryset = Matter.objects.filter(firm=self.user.firm)
+        elif self.user and self.user.firm_id:
+            self.fields['client'].queryset = Client.objects.filter(firm=self.user.firm)
+            self.fields['matter'].queryset = Matter.objects.filter(firm=self.user.firm)
+        self.helper = FormHelper(); self.helper.form_tag = False; self.helper.add_input(Submit('submit', 'Save Controlled Money Account'))
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        if self.user and self.user.firm_id:
+            obj.firm = self.user.firm
+        if commit:
+            obj.save()
+        return obj
+
+
+class ControlledMoneyReceiptForm(forms.ModelForm):
+    class Meta:
+        model = ControlledMoneyReceipt
+        fields = ['controlled_money_account', 'date_money_received', 'amount', 'payment_method', 'person_from_whom_received', 'person_on_behalf', 'matter_reference', 'matter_description', 'reason']
+        widgets = {'date_money_received': forms.DateInput(attrs={'type': 'date'})}
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        qs = ControlledMoneyAccount.objects.all()
+        if self.user and self.user.firm_id:
+            qs = qs.filter(firm=self.user.firm)
+        self.fields['controlled_money_account'].queryset = qs.filter(is_active=True)
+        self.fields['controlled_money_account'].label = 'Controlled Money Account credited'
+        self.helper = FormHelper(); self.helper.form_tag = False; self.helper.add_input(Submit('submit', 'Create Controlled Money Receipt'))
+
+    def save(self, commit=True):
+        obj = super().save(commit=False)
+        obj.firm = self.user.firm
+        obj.made_out_by = self.user
+        if commit:
+            obj.save()
+        return obj
+
+
+class ControlledMoneyWithdrawalForm(forms.ModelForm):
+    class Meta:
+        model = ControlledMoneyWithdrawal
+        fields = ['controlled_money_account', 'date', 'transaction_number', 'amount', 'withdrawal_method', 'payee', 'destination_account_name', 'destination_bsb', 'destination_account_number', 'person_on_behalf', 'matter_reference', 'reason', 'authorised_by', 'supporting_authority']
+        widgets = {'date': forms.DateInput(attrs={'type': 'date'})}
+
+    def __init__(self, *args, **kwargs):
+        self.user = kwargs.pop('user', None)
+        super().__init__(*args, **kwargs)
+        qs = ControlledMoneyAccount.objects.all()
+        if self.user and self.user.firm_id:
+            qs = qs.filter(firm=self.user.firm)
+        self.fields['controlled_money_account'].queryset = qs.filter(is_active=True)
+        self.helper = FormHelper(); self.helper.form_tag = False; self.helper.add_input(Submit('submit', 'Create Controlled Money Withdrawal'))
+
+
+class ControlledMoneyMonthlyStatementForm(forms.ModelForm):
+    class Meta:
+        model = ControlledMoneyMonthlyStatement
+        fields = ['period_end']
+        widgets = {'period_end': forms.DateInput(attrs={'type': 'date'})}
+        labels = {'period_end': 'Month end / statement date'}
+
+    def clean_period_end(self):
+        period_end = self.cleaned_data['period_end']
+        import calendar
+        if period_end.day != calendar.monthrange(period_end.year, period_end.month)[1]:
+            raise forms.ValidationError('Monthly Controlled Money Statement must be as at month end.')
+        if period_end >= timezone.localdate():
+            raise forms.ValidationError('Monthly Controlled Money Statement cannot be prepared before the month has ended.')
+        return period_end
+
+
+class ControlledMoneyPrincipalReviewForm(forms.ModelForm):
+    confirm = forms.BooleanField(label='I confirm I am authorised as principal/admin to review this Monthly Controlled Money Statement.')
+    class Meta:
+        model = ControlledMoneyMonthlyStatement
+        fields = ['reviewer_role_confirmation', 'review_note']
+        widgets = {'review_note': forms.Textarea(attrs={'rows': 3})}

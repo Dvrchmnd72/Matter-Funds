@@ -473,7 +473,7 @@ def receipt_pdf(receipt):
 import hashlib
 import json
 from django.core.files.base import ContentFile
-from .models import ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, TrustMonthlyRecord, TrustAccountingPeriod
+from .models import ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ControlledMoneySupportingDocument, TrustMonthlyRecord, TrustAccountingPeriod
 
 
 def _date_range_for_ledger(matter_ledger, date_from=None, date_to=None):
@@ -615,6 +615,18 @@ def trust_records_export_pack_zip(trust_account, date_from=None, date_to=None, y
 
         for st in ControlledMoneyMonthlyStatement.objects.filter(firm=trust_account.firm, period_end__range=(date_from, date_to)):
             add(zf, f'controlled-money/monthly-statements/{st.period_end}.pdf', ensure_controlled_money_monthly_statement_pdf(st), 'controlled-money-record')
+
+        cma_accounts = list(ControlledMoneyAccount.objects.filter(firm=trust_account.firm).values('id', 'account_name', 'bsb', 'account_number', 'person_on_behalf', 'matter_reference', 'matter_description', 'current_balance', 'is_active'))
+        csv_export(zf, 'controlled-money/exports/accounts.csv', cma_accounts, ['id', 'account_name', 'bsb', 'account_number', 'person_on_behalf', 'matter_reference', 'matter_description', 'current_balance', 'is_active'])
+        cma_receipts = list(ControlledMoneyReceipt.objects.filter(firm=trust_account.firm, date_made_out__range=(date_from, date_to)).values('id', 'controlled_money_account_id', 'receipt_number', 'date_made_out', 'date_money_received', 'amount', 'payment_method', 'person_from_whom_received', 'person_on_behalf', 'matter_reference', 'matter_description', 'reason'))
+        csv_export(zf, 'controlled-money/exports/receipts.csv', cma_receipts, ['id', 'controlled_money_account_id', 'receipt_number', 'date_made_out', 'date_money_received', 'amount', 'payment_method', 'person_from_whom_received', 'person_on_behalf', 'matter_reference', 'matter_description', 'reason'])
+        cma_withdrawals = list(ControlledMoneyWithdrawal.objects.filter(controlled_money_account__firm=trust_account.firm, date__range=(date_from, date_to)).values('id', 'controlled_money_account_id', 'date', 'transaction_number', 'amount', 'withdrawal_method', 'person_on_behalf', 'matter_reference', 'reason', 'authorised_by'))
+        csv_export(zf, 'controlled-money/exports/withdrawals.csv', cma_withdrawals, ['id', 'controlled_money_account_id', 'date', 'transaction_number', 'amount', 'withdrawal_method', 'person_on_behalf', 'matter_reference', 'reason', 'authorised_by'])
+        for receipt in ControlledMoneyReceipt.objects.filter(firm=trust_account.firm, date_made_out__range=(date_from, date_to)).select_related('controlled_money_account','made_out_by'):
+            add(zf, f'controlled-money/receipts/receipt_{receipt.receipt_number}.pdf', controlled_money_receipt_pdf_bytes(receipt), 'controlled-money-record')
+        for doc in ControlledMoneySupportingDocument.objects.filter(controlled_money_account__firm=trust_account.firm):
+            if doc.document:
+                add(zf, f'controlled-money/supporting-documents/{doc.document.name.split('/')[-1]}', doc.document.read(), 'controlled-money-evidence')
 
         txns = list(TrustTransaction.objects.filter(matter_ledger__trust_account=trust_account, date_received_or_paid__range=(date_from, date_to)).values('id', 'transaction_type', 'amount', 'date_received_or_paid', 'description', 'matter_ledger_id'))
         csv_export(zf, 'exports/trust_transactions.csv', txns, ['id', 'transaction_type', 'amount', 'date_received_or_paid', 'description', 'matter_ledger_id'])
