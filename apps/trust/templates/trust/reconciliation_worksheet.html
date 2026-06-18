@@ -13,6 +13,16 @@
   Unmatched items remain listed for investigation and corrective action.
 </div>
 
+{% if not can_edit_worksheet %}
+<div class="alert alert-secondary">
+  This reconciliation is finalised. The worksheet is locked and retained as part of the reconciliation record.
+</div>
+{% elif bank_line_count == 0 %}
+<div class="alert alert-warning">
+  No authorised ADI statement lines have been entered yet. Add the month-end bank statement credits and debits below, then match each line to the relevant cash book transaction where possible.
+</div>
+{% endif %}
+
 <div class="mb-3">
   <a href="{% url 'trust:reconciliation_detail' reconciliation.pk %}" class="btn btn-secondary">Back to Reconciliation</a>
   <a href="{% url 'trust:reconciliation_pdf' reconciliation.pk %}" class="btn btn-outline-primary">Reconciliation Statement PDF</a>
