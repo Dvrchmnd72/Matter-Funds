@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Reconciliation Worksheet – Matter Funds{% endblock %}
+{% block content %}
+<h1>Trust Authorised ADI Reconciliation Worksheet</h1>
+
+<p class="text-muted">
+  Period: {{ period_start }} to {{ reconciliation.period_end }}<br>
+  Trust account: {{ reconciliation.trust_account }}
+</p>
+
+<div class="alert alert-info">
+  Use this worksheet to tick/match authorised ADI statement credits and debits against the trust receipts and payments cash books.
+  Unmatched items remain listed for investigation and corrective action.
+</div>
+
+<div class="mb-3">
+  <a href="{% url 'trust:reconciliation_detail' reconciliation.pk %}" class="btn btn-secondary">Back to Reconciliation</a>
+  <a href="{% url 'trust:reconciliation_pdf' reconciliation.pk %}" class="btn btn-outline-primary">Reconciliation Statement PDF</a>
+</div>
+
+<h2>Authorised ADI statement lines</h2>
+
+{% if can_edit_worksheet %}
+<form method="post" class="card card-body mb-4">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="add_line">
+  <div class="row">
+    <div class="col-md-2">
+      {{ line_form.line_date.label_tag }}
+      {{ line_form.line_date }}
+    </div>
+    <div class="col-md-3">
+      {{ line_form.line_type.label_tag }}
+      {{ line_form.line_type }}
+    </div>
+    <div class="col-md-2">
+      {{ line_form.amount.label_tag }}
+      {{ line_form.amount }}
+    </div>
+    <div class="col-md-3">
+      {{ line_form.description.label_tag }}
+      {{ line_form.description }}
+    </div>
+    <div class="col-md-2">
+      {{ line_form.reference.label_tag }}
+      {{ line_form.reference }}
+    </div>
+  </div>
+  <div class="mt-2">
+    {{ line_form.notes.label_tag }}
+    {{ line_form.notes }}
+  </div>
+  <button type="submit" class="btn btn-primary mt-3">Add bank statement line</button>
+</form>
+{% endif %}
+
+<table class="table table-sm table-striped">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Type</th>
+      <th>Amount</th>
+      <th>Description</th>
+      <th>Reference</th>
+      <th>Matched cash book transaction</th>
+      <th>Notes</th>
+      {% if can_edit_worksheet %}<th>Actions</th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for line in bank_lines %}
+    <tr>
+      <td>{{ line.line_date }}</td>
+      <td>{{ line.get_line_type_display }}</td>
+      <td>${{ line.amount }}</td>
+      <td>{{ line.description }}</td>
+      <td>{{ line.reference|default:"—" }}</td>
+      <td>
+        {% if can_edit_worksheet %}
+        <form method="post">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="match_line">
+          <input type="hidden" name="line_id" value="{{ line.pk }}">
+          <select name="matched_transaction" class="form-select form-select-sm">
+            <option value="">Unmatched bank statement line</option>
+            {% for candidate in candidate_transactions %}
+              <option value="{{ candidate.id }}" {% if line.matched_transaction_id == candidate.id %}selected{% endif %}>{{ candidate.label }}</option>
+            {% endfor %}
+          </select>
+          <textarea name="notes" class="form-control form-control-sm mt-1" rows="2">{{ line.notes }}</textarea>
+          <button type="submit" class="btn btn-sm btn-outline-primary mt-1">Save match</button>
+        </form>
+        {% else %}
+          {% if line.matched_transaction %}{{ line.matched_transaction }}{% else %}Unmatched{% endif %}
+        {% endif %}
+      </td>
+      <td>{{ line.notes|default:"—" }}</td>
+      {% if can_edit_worksheet %}
+      <td>
+        <form method="post" onsubmit="return confirm('Remove this bank statement line?');">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="delete_line">
+          <input type="hidden" name="line_id" value="{{ line.pk }}">
+          <button type="submit" class="btn btn-sm btn-outline-danger">Remove</button>
+        </form>
+      </td>
+      {% endif %}
+    </tr>
+    {% empty %}
+    <tr><td colspan="8">No authorised ADI statement lines entered yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Reconciliation investigation lists</h2>
+
+<div class="row">
+  <div class="col-md-6">
+    <h3 class="h5">Credits in authorised ADI statement not in cash book</h3>
+    <ul>
+      {% for line in unmatched_bank_credits %}
+        <li>{{ line.line_date }} – ${{ line.amount }} – {{ line.description }} {% if line.reference %}({{ line.reference }}){% endif %}</li>
+      {% empty %}
+        <li>None</li>
+      {% endfor %}
+    </ul>
+
+    <h3 class="h5">Receipts in cash book not in authorised ADI statement / outstanding deposits</h3>
+    <ul>
+      {% for txn in outstanding_deposits %}
+        <li>{{ txn.date_received_or_paid }} – ${{ txn.amount }} – {{ txn.description }}</li>
+      {% empty %}
+        <li>None</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="col-md-6">
+    <h3 class="h5">Debits in authorised ADI statement not in cash book</h3>
+    <ul>
+      {% for line in unmatched_bank_debits %}
+        <li>{{ line.line_date }} – ${{ line.amount }} – {{ line.description }} {% if line.reference %}({{ line.reference }}){% endif %}</li>
+      {% empty %}
+        <li>None</li>
+      {% endfor %}
+    </ul>
+
+    <h3 class="h5">Unpresented cheques</h3>
+    <ul>
+      {% for txn in unpresented_cheques %}
+        <li>{{ txn.date_received_or_paid }} – ${{ txn.amount }} – {{ txn.description }}</li>
+      {% empty %}
+        <li>None</li>
+      {% endfor %}
+    </ul>
+
+    <h3 class="h5">Other payments in cash book not in authorised ADI statement</h3>
+    <ul>
+      {% for txn in other_payments_not_in_adi %}
+        <li>{{ txn.date_received_or_paid }} – ${{ txn.amount }} – {{ txn.description }}</li>
+      {% empty %}
+        <li>None</li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>
+
+<p class="text-muted">
+  Matched cash book transactions: {{ matched_count }}. Authorised ADI statement lines entered: {{ bank_line_count }}.
+</p>
+{% endblock %}

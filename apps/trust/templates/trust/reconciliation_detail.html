@@ -43,6 +43,7 @@
 {% endif %}
 {% if can_finalise %}<a href="{% url 'trust:reconciliation_finalise' reconciliation.pk %}" class="btn btn-success">Finalise Reconciliation</a>{% endif %}
 {% if can_lock_period %}<a href="{% url 'trust:period_lock' accounting_period.pk %}" class="btn btn-danger">Lock Period</a>{% endif %}
+<a href="{% url 'trust:reconciliation_worksheet' reconciliation.pk %}" class="btn btn-outline-primary">ADI Matching Worksheet</a>
 <a href="{% url 'trust:reconciliation_pdf' reconciliation.pk %}" class="btn btn-primary">Download Reconciliation PDF</a>
 {% if reconciliation.bank_statement_pdf %}
   <a href="{% url 'trust:reconciliation_bank_statement' reconciliation.pk %}?download=1" class="btn btn-outline-primary">Download Bank Statement</a>

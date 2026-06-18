@@ -704,6 +704,72 @@ class MonthlyReconciliation(models.Model):
         return super().delete(*args, **kwargs)
 
 
+class ReconciliationBankLine(models.Model):
+    LINE_TYPE_CREDIT = 'credit'
+    LINE_TYPE_DEBIT = 'debit'
+    LINE_TYPE_CHOICES = [
+        (LINE_TYPE_CREDIT, 'Credit in authorised ADI statement'),
+        (LINE_TYPE_DEBIT, 'Debit in authorised ADI statement'),
+    ]
+
+    reconciliation = models.ForeignKey(
+        MonthlyReconciliation,
+        on_delete=models.CASCADE,
+        related_name='bank_lines',
+    )
+    line_date = models.DateField()
+    line_type = models.CharField(max_length=10, choices=LINE_TYPE_CHOICES)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
+    description = models.CharField(max_length=500)
+    reference = models.CharField(max_length=100, blank=True)
+    matched_transaction = models.ForeignKey(
+        TrustTransaction,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='authorised_adi_matches',
+    )
+    notes = models.TextField(blank=True, default='')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='reconciliation_bank_lines_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    matched_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='reconciliation_bank_lines_matched')
+    matched_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = 'Authorised ADI Statement Line'
+        verbose_name_plural = 'Authorised ADI Statement Lines'
+        ordering = ['line_date', 'id']
+        indexes = [
+            models.Index(fields=['reconciliation', 'line_type']),
+            models.Index(fields=['reconciliation', 'matched_transaction']),
+            models.Index(fields=['line_date']),
+        ]
+
+    @property
+    def is_matched(self):
+        return bool(self.matched_transaction_id)
+
+    def clean(self):
+        errors = {}
+        if self.reconciliation_id and self.line_date and self.line_date > self.reconciliation.period_end:
+            errors['line_date'] = 'Bank statement line date cannot be after the reconciliation period end.'
+        if self.reconciliation_id and self.matched_transaction_id:
+            if self.matched_transaction.matter_ledger.trust_account_id != self.reconciliation.trust_account_id:
+                errors['matched_transaction'] = 'Matched transaction must belong to the same trust account.'
+        if self.reconciliation_id and self.reconciliation.is_finalised:
+            errors['reconciliation'] = 'Finalised reconciliations cannot be changed.'
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.get_line_type_display()} ${self.amount} on {self.line_date}"
+
+
+
 class TrustMonthlyRecord(models.Model):
     RECORD_RECEIPTS_CASH_BOOK = 'receipts_cash_book'
     RECORD_PAYMENTS_CASH_BOOK = 'payments_cash_book'

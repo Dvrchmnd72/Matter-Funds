@@ -15,13 +15,13 @@ from apps.trust import services
 from apps.trust import reports as trust_reports
 from .models import (
     TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment, TrustJournal,
-    MonthlyReconciliation, Irregularity, TrustAccountingPeriod, TrustMonthlyRecord,
+    MonthlyReconciliation, ReconciliationBankLine, Irregularity, TrustAccountingPeriod, TrustMonthlyRecord,
     ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement,
 )
 from .forms import (
     TrustAccountUpdateForm, ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm,
     ManualIrregularityForm, IrregularityResolveForm, DateRangeForm, YearForm,
-    ReconciliationFinaliseForm, AccountingPeriodLockForm, ReconciliationBankStatementForm,
+    ReconciliationFinaliseForm, AccountingPeriodLockForm, ReconciliationBankStatementForm, ReconciliationBankLineForm,
     ControlledMoneyAccountForm, ControlledMoneyReceiptForm, ControlledMoneyWithdrawalForm,
     ControlledMoneyMonthlyStatementForm, ControlledMoneyPrincipalReviewForm,
 )
@@ -433,6 +433,175 @@ class ReconciliationDetailView(StaffRequiredMixin, DetailView):
             and self.request.user.role in ('admin', 'accountant')
         )
         return ctx
+
+
+def _cash_book_direction(txn):
+    if txn.transaction_type == 'receipt':
+        return 'credit'
+    if txn.transaction_type in {'payment', 'transfer_to_office'}:
+        return 'debit'
+    if txn.transaction_type == 'reversal' and txn.reverses_id:
+        if txn.reverses.transaction_type in {'payment', 'transfer_to_office'}:
+            return 'credit'
+        if txn.reverses.transaction_type == 'receipt':
+            return 'debit'
+    return None
+
+
+def _cash_book_match_label(txn):
+    matter = txn.matter_ledger.matter
+    bits = [
+        str(txn.date_received_or_paid),
+        txn.get_transaction_type_display(),
+        f"${txn.amount}",
+        matter.file_number or f"Matter {matter.pk}",
+        txn.description,
+    ]
+    return " | ".join(str(bit) for bit in bits if bit)
+
+
+class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
+    template_name = 'trust/reconciliation_worksheet.html'
+
+    def get_reconciliation(self):
+        queryset = scope_trust_queryset_for_user(
+            MonthlyReconciliation.objects.select_related('trust_account', 'accounting_period'),
+            self.request.user,
+        )
+        return get_object_or_404(queryset, pk=self.kwargs['pk'])
+
+    def _period_start(self, reconciliation):
+        return reconciliation.period_end.replace(day=1)
+
+    def _internal_transactions(self, reconciliation):
+        period_start = self._period_start(reconciliation)
+        return (
+            TrustTransaction.objects
+            .filter(
+                matter_ledger__trust_account=reconciliation.trust_account,
+                date_received_or_paid__gte=period_start,
+                date_received_or_paid__lte=reconciliation.period_end,
+                transaction_type__in=['receipt', 'payment', 'transfer_to_office', 'reversal'],
+            )
+            .select_related(
+                'matter_ledger__matter',
+                'matter_ledger__matter__client',
+                'receipt',
+                'payment',
+                'reverses',
+            )
+            .order_by('date_received_or_paid', 'pk')
+        )
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        reconciliation = self.get_reconciliation()
+        internal_transactions = list(self._internal_transactions(reconciliation))
+        bank_lines = list(
+            reconciliation.bank_lines
+            .select_related('matched_transaction', 'matched_transaction__matter_ledger__matter')
+            .order_by('line_date', 'pk')
+        )
+
+        matched_ids = {
+            line.matched_transaction_id
+            for line in bank_lines
+            if line.matched_transaction_id
+        }
+
+        credit_transactions = [txn for txn in internal_transactions if _cash_book_direction(txn) == 'credit']
+        debit_transactions = [txn for txn in internal_transactions if _cash_book_direction(txn) == 'debit']
+
+        outstanding_deposits = [txn for txn in credit_transactions if txn.pk not in matched_ids]
+        unmatched_debits = [txn for txn in debit_transactions if txn.pk not in matched_ids]
+
+        unpresented_cheques = [
+            txn for txn in unmatched_debits
+            if hasattr(txn, 'payment') and txn.payment.payment_method == 'cheque'
+        ]
+        other_payments_not_in_adi = [
+            txn for txn in unmatched_debits
+            if txn not in unpresented_cheques
+        ]
+
+        unmatched_bank_credits = [
+            line for line in bank_lines
+            if line.line_type == ReconciliationBankLine.LINE_TYPE_CREDIT and not line.matched_transaction_id
+        ]
+        unmatched_bank_debits = [
+            line for line in bank_lines
+            if line.line_type == ReconciliationBankLine.LINE_TYPE_DEBIT and not line.matched_transaction_id
+        ]
+
+        ctx.update({
+            'reconciliation': reconciliation,
+            'period_start': self._period_start(reconciliation),
+            'line_form': ReconciliationBankLineForm(),
+            'bank_lines': bank_lines,
+            'candidate_transactions': [
+                {'id': txn.pk, 'label': _cash_book_match_label(txn)}
+                for txn in internal_transactions
+            ],
+            'outstanding_deposits': outstanding_deposits,
+            'unpresented_cheques': unpresented_cheques,
+            'other_payments_not_in_adi': other_payments_not_in_adi,
+            'unmatched_bank_credits': unmatched_bank_credits,
+            'unmatched_bank_debits': unmatched_bank_debits,
+            'matched_count': len(matched_ids),
+            'bank_line_count': len(bank_lines),
+            'can_edit_worksheet': not reconciliation.is_finalised,
+        })
+        return ctx
+
+    def post(self, request, *args, **kwargs):
+        reconciliation = self.get_reconciliation()
+        if reconciliation.is_finalised:
+            messages.error(request, 'Finalised reconciliations cannot be changed.')
+            return redirect(reverse('trust:reconciliation_worksheet', kwargs={'pk': reconciliation.pk}))
+
+        action = request.POST.get('action')
+
+        if action == 'add_line':
+            form = ReconciliationBankLineForm(request.POST)
+            if form.is_valid():
+                line = form.save(commit=False)
+                line.reconciliation = reconciliation
+                line.created_by = request.user
+                line.save()
+                messages.success(request, 'Authorised ADI statement line added.')
+            else:
+                messages.error(request, form.errors.as_text())
+
+        elif action == 'match_line':
+            line = get_object_or_404(reconciliation.bank_lines.all(), pk=request.POST.get('line_id'))
+            txn_id = request.POST.get('matched_transaction') or None
+            line.notes = request.POST.get('notes', '')
+            if txn_id:
+                txn = get_object_or_404(
+                    self._internal_transactions(reconciliation),
+                    pk=txn_id,
+                )
+                line.matched_transaction = txn
+                line.matched_by = request.user
+                line.matched_at = timezone.now()
+                messages.success(request, 'Bank line matched to cash book transaction.')
+            else:
+                line.matched_transaction = None
+                line.matched_by = None
+                line.matched_at = None
+                messages.success(request, 'Bank line marked as unmatched.')
+            line.save()
+
+        elif action == 'delete_line':
+            line = get_object_or_404(reconciliation.bank_lines.all(), pk=request.POST.get('line_id'))
+            line.delete()
+            messages.success(request, 'Authorised ADI statement line removed.')
+
+        else:
+            messages.error(request, 'Unknown worksheet action.')
+
+        return redirect(reverse('trust:reconciliation_worksheet', kwargs={'pk': reconciliation.pk}))
+
 
 
 class ReconciliationBankStatementView(AdminOrAccountantMixin, UpdateView):

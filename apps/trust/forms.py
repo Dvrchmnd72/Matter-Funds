@@ -5,7 +5,7 @@ from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
 from apps.clients.models import Client
 from apps.matters.models import Matter
-from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement
+from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ReconciliationBankLine
 
 
 class TrustAccountUpdateForm(forms.ModelForm):
@@ -192,6 +192,25 @@ class TransferCostsToOfficeForm(forms.Form):
         # platform should not block the trust transaction solely because the
         # document is not uploaded at the time of entry.
         return cleaned_data
+
+
+class ReconciliationBankLineForm(forms.ModelForm):
+    class Meta:
+        model = ReconciliationBankLine
+        fields = ['line_date', 'line_type', 'amount', 'description', 'reference', 'notes']
+        widgets = {
+            'line_date': forms.DateInput(attrs={'type': 'date'}),
+            'notes': forms.Textarea(attrs={'rows': 2}),
+        }
+        labels = {
+            'line_date': 'Authorised ADI statement date',
+            'line_type': 'Statement line type',
+            'amount': 'Statement amount',
+            'description': 'Statement description',
+            'reference': 'Bank reference',
+            'notes': 'Investigation / correction notes',
+        }
+
 
 
 class ManualIrregularityForm(forms.ModelForm):
