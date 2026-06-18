@@ -257,7 +257,7 @@ def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
     _validate_not_future(date_received, 'Trust receipt date received / confirmed')
     if date_banked:
         _validate_not_future(date_banked, 'Trust receipt date deposited')
-    if payment_method in {'eft', 'direct_deposit'}:
+    if payment_method in {'eft', 'direct_deposit', 'credit_card'}:
         date_banked = date_received
     elif payment_method in {'cash', 'cheque'} and date_banked is None:
         raise ValidationError('Date deposited to trust account is required for cash or cheque receipts.')
@@ -358,12 +358,11 @@ def _validate_costs_withdrawal_evidence(*, costs_withdrawal_method, costs_eviden
     valid_methods = {choice for choice, _ in Payment.COSTS_WITHDRAWAL_METHOD_CHOICES}
     if costs_withdrawal_method not in valid_methods:
         raise ValidationError("Invalid costs withdrawal method.")
-    if not any([costs_evidence_file, notice_or_request_file, authority_or_agreement_file, reimbursement_evidence_file]):
-        raise ValidationError("At least one costs withdrawal evidence document is required.")
-    if costs_withdrawal_method in ('method_2_authority', 'method_4_commercial_government') and not authority_or_agreement_file:
-        raise ValidationError("Authority or agreement evidence is required for this withdrawal method.")
-    if costs_withdrawal_method == 'method_3_reimbursement' and not reimbursement_evidence_file:
-        raise ValidationError("Reimbursement evidence is required for Method 3 withdrawals.")
+
+    # Evidence documents should be retained for examiner review where available,
+    # but the system must not block the transaction solely because evidence has
+    # not been uploaded at entry time. Uploaded evidence is still saved on the
+    # Payment source record/PDF.
 
 
 def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, payee_bsb='',
