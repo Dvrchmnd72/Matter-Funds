@@ -1,7 +1,7 @@
 import datetime
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import Q, Count
 from django.http import FileResponse, Http404, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse_lazy, reverse
@@ -14,12 +14,12 @@ from apps.accounts.permissions import StaffRequiredMixin, AdminOrAccountantMixin
 from apps.trust import services
 from apps.trust import reports as trust_reports
 from .models import (
-    TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment,
+    TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment, TrustJournal,
     MonthlyReconciliation, Irregularity, TrustAccountingPeriod, TrustMonthlyRecord,
     ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement,
 )
 from .forms import (
-    ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm,
+    TrustAccountUpdateForm, ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm,
     ManualIrregularityForm, IrregularityResolveForm, DateRangeForm, YearForm,
     ReconciliationFinaliseForm, AccountingPeriodLockForm, ReconciliationBankStatementForm,
     ControlledMoneyAccountForm, ControlledMoneyReceiptForm, ControlledMoneyWithdrawalForm,
@@ -68,14 +68,64 @@ class TrustAccountDetailView(StaffRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx['ledgers'] = self.object.ledgers.select_related('matter').order_by('matter__file_number')
+
+        show_all_ledgers = self.request.GET.get('show_all_ledgers') in {'1', 'true', 'yes'}
+
+        all_ledgers = (
+            self.object.ledgers
+            .select_related('matter', 'matter__client')
+            .annotate(transaction_count=Count('transactions'))
+            .order_by('matter__file_number', 'pk')
+        )
+
+        if show_all_ledgers:
+            ledgers = all_ledgers
+        else:
+            ledgers = all_ledgers.filter(Q(transaction_count__gt=0) | ~Q(balance=0))
+
+        total_count = all_ledgers.count()
+        visible_count = ledgers.count()
+
+        ctx['ledgers'] = ledgers
+        ctx['show_all_ledgers'] = show_all_ledgers
+        ctx['ledger_total_count'] = total_count
+        ctx['ledger_visible_count'] = visible_count
+        ctx['ledger_hidden_count'] = max(total_count - visible_count, 0)
         ctx['recent_transactions'] = (
             TrustTransaction.objects
             .filter(matter_ledger__trust_account=self.object)
-            .select_related('matter_ledger__matter')
+            .select_related(
+                'matter_ledger__matter',
+                'receipt',
+                'payment',
+                'reverses',
+                'journal_as_out',
+                'journal_as_in',
+            )
             .order_by('-created_at')[:20]
         )
         return ctx
+
+
+class TrustAccountUpdateView(AdminOrAccountantMixin, UpdateView):
+    model = TrustAccount
+    form_class = TrustAccountUpdateForm
+    template_name = 'trust/account_form.html'
+    context_object_name = 'account'
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related('firm'),
+            self.request.user,
+            firm_lookup='firm',
+        )
+
+    def get_success_url(self):
+        return reverse('trust:account_detail', kwargs={'pk': self.object.pk})
+
+    def form_valid(self, form):
+        messages.success(self.request, 'Trust account details updated.')
+        return super().form_valid(form)
 
 
 class ReceiptCreateView(StaffRequiredMixin, View):
@@ -171,10 +221,28 @@ class PaymentCreateView(StaffRequiredMixin, View):
                     created_by=request.user,
                 )
                 messages.success(request, f'Payment #{payment.payment_number} created successfully.')
-                return redirect(reverse('trust:account_detail', kwargs={'pk': ledger.trust_account_id}))
+                return redirect(reverse('trust:payment_detail', kwargs={'pk': payment.pk}))
             except (ValidationError, Exception) as e:
                 messages.error(request, str(e))
         return render(request, self.template_name, {'form': form, 'ledger': ledger})
+
+
+
+class PaymentDetailView(StaffRequiredMixin, DetailView):
+    model = Payment
+    template_name = 'trust/payment_detail.html'
+    context_object_name = 'payment'
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related(
+                'transaction__matter_ledger__trust_account__firm',
+                'transaction__matter_ledger__matter__client',
+                'authorised_by',
+            ),
+            self.request.user,
+            firm_lookup='transaction__matter_ledger__trust_account__firm',
+        )
 
 
 class TransferCostsToOfficeCreateView(AdminOrAccountantMixin, View):
@@ -218,7 +286,7 @@ class TransferCostsToOfficeCreateView(AdminOrAccountantMixin, View):
                     costs_withdrawal_notes=cd.get('costs_withdrawal_notes', ''),
                 )
                 messages.success(request, f'Transfer to office #{payment.payment_number} created successfully.')
-                return redirect(reverse('trust:account_detail', kwargs={'pk': ledger.trust_account_id}))
+                return redirect(reverse('trust:payment_detail', kwargs={'pk': payment.pk}))
             except (ValidationError, Exception) as e:
                 messages.error(request, str(e))
         return render(request, self.template_name, {'form': form, 'ledger': ledger})
@@ -653,6 +721,23 @@ class PaymentsJournalPDFView(StaffRequiredMixin, View):
         return trust_reports.payments_journal_pdf(account, date_from, date_to)
 
 
+
+class TrustCashBookSummaryPDFView(StaffRequiredMixin, View):
+    def get(self, request, pk):
+        account = get_object_or_404(
+            scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
+            pk=pk,
+        )
+        form = DateRangeForm(request.GET)
+        if form.is_valid():
+            date_from = form.cleaned_data.get('date_from') or datetime.date(datetime.date.today().year, 1, 1)
+            date_to = form.cleaned_data.get('date_to') or datetime.date.today()
+        else:
+            date_from = datetime.date(datetime.date.today().year, 1, 1)
+            date_to = datetime.date.today()
+        return trust_reports.trust_cash_book_summary_pdf(account, date_from, date_to)
+
+
 class TrustTransferJournalPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
         account = get_object_or_404(
@@ -775,6 +860,65 @@ class ReceiptPDFView(StaffRequiredMixin, View):
         )
         return trust_reports.receipt_pdf(receipt)
 
+
+class PaymentPDFView(StaffRequiredMixin, View):
+    def get(self, request, pk):
+        payment = get_object_or_404(
+            scope_trust_queryset_for_user(
+                Payment.objects.select_related(
+                    'transaction__matter_ledger__trust_account__firm',
+                    'transaction__matter_ledger__matter__client',
+                    'authorised_by',
+                ),
+                request.user,
+                firm_lookup='transaction__matter_ledger__trust_account__firm',
+            ),
+            pk=pk,
+        )
+        return trust_reports.payment_pdf(payment)
+
+
+
+class TrustJournalDetailView(StaffRequiredMixin, DetailView):
+    model = TrustJournal
+    template_name = 'trust/journal_detail.html'
+    context_object_name = 'journal'
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            super().get_queryset().select_related(
+                'from_ledger__trust_account__firm',
+                'from_ledger__matter__client',
+                'to_ledger__matter__client',
+                'created_by',
+                'journal_out_txn',
+                'journal_in_txn',
+            ),
+            self.request.user,
+            firm_lookup='from_ledger__trust_account__firm',
+        )
+
+
+class TrustJournalPDFView(StaffRequiredMixin, View):
+    def get(self, request, pk):
+        journal = get_object_or_404(
+            scope_trust_queryset_for_user(
+                TrustJournal.objects.select_related(
+                    'from_ledger__trust_account__firm',
+                    'from_ledger__matter__client',
+                    'to_ledger__matter__client',
+                    'created_by',
+                    'journal_out_txn',
+                    'journal_in_txn',
+                ),
+                request.user,
+                firm_lookup='from_ledger__trust_account__firm',
+            ),
+            pk=pk,
+        )
+        return trust_reports.trust_journal_pdf(journal)
+
+
 class ControlledMoneyAccountListView(AdminOrAccountantMixin, ListView):
     model = ControlledMoneyAccount
     template_name = 'trust/controlled_money/account_list.html'
@@ -867,3 +1011,49 @@ class ControlledMoneyMonthlyStatementPDFView(AdminOrAccountantMixin, View):
     def get(self, request, pk):
         st=get_object_or_404(scope_trust_queryset_for_user(ControlledMoneyMonthlyStatement.objects.select_related('firm'), request.user, firm_lookup='firm'), pk=pk)
         return trust_reports._pdf_response_from_bytes(f'controlled_money_statement_{st.period_end}.pdf', trust_reports.ensure_controlled_money_monthly_statement_pdf(st))
+
+
+class ReversalDetailView(StaffRequiredMixin, DetailView):
+    model = TrustTransaction
+    template_name = 'trust/reversal_detail.html'
+    context_object_name = 'reversal'
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            super().get_queryset()
+            .filter(transaction_type='reversal')
+            .select_related(
+                'matter_ledger__trust_account__firm',
+                'matter_ledger__matter__client',
+                'created_by',
+                'reverses',
+                'reverses__matter_ledger__matter__client',
+                'reverses__receipt',
+                'reverses__payment',
+            ),
+            self.request.user,
+            firm_lookup='matter_ledger__trust_account__firm',
+        )
+
+
+class ReversalPDFView(StaffRequiredMixin, View):
+    def get(self, request, pk):
+        reversal = get_object_or_404(
+            scope_trust_queryset_for_user(
+                TrustTransaction.objects
+                .filter(transaction_type='reversal')
+                .select_related(
+                    'matter_ledger__trust_account__firm',
+                    'matter_ledger__matter__client',
+                    'created_by',
+                    'reverses',
+                    'reverses__matter_ledger__matter__client',
+                    'reverses__receipt',
+                    'reverses__payment',
+                ),
+                request.user,
+                firm_lookup='matter_ledger__trust_account__firm',
+            ),
+            pk=pk,
+        )
+        return trust_reports.reversal_pdf(reversal)

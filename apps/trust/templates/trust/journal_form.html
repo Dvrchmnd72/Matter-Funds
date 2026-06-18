@@ -14,6 +14,18 @@
 </div>
 {% else %}
 <p class="text-muted">Account: <strong>{{ trust_account }}</strong></p>
+
+<div class="alert alert-info">
+  A trust journal transfer moves money between two matter ledgers under the same trust account.
+  You need at least two matter ledgers before a transfer can be recorded.
+</div>
+
+{% if form.fields.from_ledger.queryset.count < 2 %}
+<div class="alert alert-warning">
+  This trust account currently has fewer than two matter ledgers. Create another matter first, then return here to record the journal transfer.
+</div>
+{% endif %}
+
 <div class="row"><div class="col-md-8">
   <form method="post" enctype="multipart/form-data">
     {% csrf_token %}

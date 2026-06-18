@@ -44,3 +44,26 @@ class Matter(models.Model):
                 super().save(*args, **kwargs)
         else:
             super().save(*args, **kwargs)
+
+        self.ensure_default_trust_ledger()
+
+    def ensure_default_trust_ledger(self):
+        """Create the matter's trust ledger under the firm's active general trust account.
+
+        The trust bank account remains one general trust account. This creates the
+        required matter-level sub-ledger used for receipts, payments, journals,
+        ledger statements and trial balance reporting.
+        """
+        from apps.trust.models import MatterLedger, TrustAccount
+
+        trust_account = (
+            TrustAccount.objects
+            .filter(firm_id=self.firm_id, is_general=True, is_active=True)
+            .order_by("pk")
+            .first()
+        )
+        if trust_account:
+            MatterLedger.objects.get_or_create(
+                matter=self,
+                trust_account=trust_account,
+            )

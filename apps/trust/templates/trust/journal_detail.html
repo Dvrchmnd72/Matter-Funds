@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Journal J{{ journal.pk }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>Trust Journal Transfer J{{ journal.pk }}</h1>
+
+<dl class="row">
+  <dt class="col-sm-4">Trust account</dt>
+  <dd class="col-sm-8">{{ journal.from_ledger.trust_account }}</dd>
+
+  <dt class="col-sm-4">Date of transfer</dt>
+  <dd class="col-sm-8">{{ journal.journal_out_txn.date_received_or_paid }}</dd>
+
+  <dt class="col-sm-4">Amount transferred</dt>
+  <dd class="col-sm-8">${{ journal.amount }}</dd>
+
+  <dt class="col-sm-4">Reason / purpose of transfer</dt>
+  <dd class="col-sm-8">{{ journal.description }}</dd>
+
+  <dt class="col-sm-4">From matter ledger</dt>
+  <dd class="col-sm-8">
+    {{ journal.from_ledger.matter.client.name }}<br>
+    Ref: {{ journal.from_ledger.matter.file_number }}<br>
+    {{ journal.from_ledger.matter.description }}
+  </dd>
+
+  <dt class="col-sm-4">To matter ledger</dt>
+  <dd class="col-sm-8">
+    {{ journal.to_ledger.matter.client.name }}<br>
+    Ref: {{ journal.to_ledger.matter.file_number }}<br>
+    {{ journal.to_ledger.matter.description }}
+  </dd>
+
+  <dt class="col-sm-4">Debit posting</dt>
+  <dd class="col-sm-8">{{ journal.from_ledger.matter.file_number }} — ${{ journal.amount }}</dd>
+
+  <dt class="col-sm-4">Credit posting</dt>
+  <dd class="col-sm-8">{{ journal.to_ledger.matter.file_number }} — ${{ journal.amount }}</dd>
+
+  <dt class="col-sm-4">Authority date</dt>
+  <dd class="col-sm-8">{{ journal.authority_date }}</dd>
+
+  <dt class="col-sm-4">Authority signed by</dt>
+  <dd class="col-sm-8">{{ journal.authority_signed_by }}</dd>
+
+  <dt class="col-sm-4">Written authority retained</dt>
+  <dd class="col-sm-8">{{ journal.written_authority.name }}</dd>
+
+  <dt class="col-sm-4">Created by</dt>
+  <dd class="col-sm-8">{{ journal.created_by }}</dd>
+
+  <dt class="col-sm-4">Cash book effect</dt>
+  <dd class="col-sm-8">No effect on the trust cash book/control account.</dd>
+</dl>
+
+<a href="{% url 'trust:journal_pdf' journal.pk %}" class="btn btn-primary">Download PDF</a>
+<a href="{% url 'trust:account_detail' journal.from_ledger.trust_account.pk %}" class="btn btn-secondary">Back to Account</a>
+{% endblock %}

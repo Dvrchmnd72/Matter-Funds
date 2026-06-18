@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Payment #{{ payment.payment_number }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>
+  {% if payment.transaction.transaction_type == 'transfer_to_office' %}
+    Transfer Costs to Office Source Record #{{ payment.payment_number }}
+  {% else %}
+    Trust Payment Source Record #{{ payment.payment_number }}
+  {% endif %}
+</h1>
+
+<dl class="row">
+  <dt class="col-sm-4">Law practice name</dt>
+  <dd class="col-sm-8">{{ payment.transaction.matter_ledger.trust_account.firm.name }}</dd>
+
+  <dt class="col-sm-4">Expression</dt>
+  <dd class="col-sm-8">Law Practice Trust Account</dd>
+
+  <dt class="col-sm-4">Trust account</dt>
+  <dd class="col-sm-8">{{ payment.transaction.matter_ledger.trust_account }}</dd>
+
+  <dt class="col-sm-4">Withdrawal type</dt>
+  <dd class="col-sm-8">{{ payment.transaction.get_transaction_type_display }}</dd>
+
+  <dt class="col-sm-4">Withdrawal method</dt>
+  <dd class="col-sm-8">{{ payment.get_payment_method_display }}</dd>
+
+  <dt class="col-sm-4">Payment / EFT reference</dt>
+  <dd class="col-sm-8">{{ payment.payment_number }}</dd>
+
+  {% if payment.cheque_number %}
+  <dt class="col-sm-4">Cheque number</dt>
+  <dd class="col-sm-8">{{ payment.cheque_number }}</dd>
+  {% endif %}
+
+  <dt class="col-sm-4">Date of cheque / EFT</dt>
+  <dd class="col-sm-8">{{ payment.transaction.date_received_or_paid }}</dd>
+
+  <dt class="col-sm-4">Amount ordered to be paid</dt>
+  <dd class="col-sm-8">${{ payment.transaction.amount }}</dd>
+
+  <dt class="col-sm-4">Pay to / payee</dt>
+  <dd class="col-sm-8">{{ payment.payee_name }}</dd>
+
+  {% if payment.payee_bsb or payment.payee_account %}
+  <dt class="col-sm-4">Payee BSB / Account number</dt>
+  <dd class="col-sm-8">{{ payment.payee_bsb }} / {{ payment.payee_account }}</dd>
+  {% endif %}
+
+  <dt class="col-sm-4">On behalf of / client</dt>
+  <dd class="col-sm-8">{{ payment.transaction.matter_ledger.matter.client.name }}</dd>
+
+  <dt class="col-sm-4">Matter reference</dt>
+  <dd class="col-sm-8">{{ payment.transaction.matter_ledger.matter.file_number }}</dd>
+
+  <dt class="col-sm-4">Matter description</dt>
+  <dd class="col-sm-8">{{ payment.transaction.matter_ledger.matter.description }}</dd>
+
+  <dt class="col-sm-4">Ledger account debited</dt>
+  <dd class="col-sm-8">{{ payment.transaction.matter_ledger }}</dd>
+
+  <dt class="col-sm-4">Reason / purpose of payment</dt>
+  <dd class="col-sm-8">{{ payment.purpose }}</dd>
+
+  <dt class="col-sm-4">Authorised by</dt>
+  <dd class="col-sm-8">{{ payment.authorised_by }}</dd>
+
+  <dt class="col-sm-4">Created by</dt>
+  <dd class="col-sm-8">{{ payment.transaction.created_by }}</dd>
+</dl>
+
+{% if payment.transaction.transaction_type == 'transfer_to_office' %}
+<h2 class="h4 mt-4">Costs transfer evidence</h2>
+<dl class="row">
+  <dt class="col-sm-4">Costs withdrawal method</dt>
+  <dd class="col-sm-8">{{ payment.get_costs_withdrawal_method_display }}</dd>
+
+  <dt class="col-sm-4">Key evidence date</dt>
+  <dd class="col-sm-8">{{ payment.key_evidence_date|default:"—" }}</dd>
+
+  <dt class="col-sm-4">Costs evidence file</dt>
+  <dd class="col-sm-8">{{ payment.costs_evidence_file.name|default:"—" }}</dd>
+
+  <dt class="col-sm-4">Notice/request file</dt>
+  <dd class="col-sm-8">{{ payment.notice_or_request_file.name|default:"—" }}</dd>
+
+  <dt class="col-sm-4">Authority/agreement file</dt>
+  <dd class="col-sm-8">{{ payment.authority_or_agreement_file.name|default:"—" }}</dd>
+
+  <dt class="col-sm-4">Reimbursement evidence file</dt>
+  <dd class="col-sm-8">{{ payment.reimbursement_evidence_file.name|default:"—" }}</dd>
+
+  <dt class="col-sm-4">Costs withdrawal notes</dt>
+  <dd class="col-sm-8">{{ payment.costs_withdrawal_notes|default:"—" }}</dd>
+</dl>
+
+<div class="alert alert-info">
+  This source record should be read with the retained evidence file(s). The trust ledger and payments cash book retain the payment entry; this page records the costs-withdrawal authority/evidence particulars.
+</div>
+{% endif %}
+
+{% if payment.transaction.is_reversed %}
+<div class="alert alert-warning">
+  This payment has been reversed. The original payment source record remains retained.
+</div>
+{% else %}
+<div class="card my-3">
+  <div class="card-body">
+    <h2 class="h5">Reverse issued payment</h2>
+    <p class="text-muted mb-2">
+      Use this only where an issued trust payment needs correction, stop-payment treatment, stale cheque reversal, or costs-transfer correction.
+    </p>
+    <form method="post" action="{% url 'trust:transaction_reverse' payment.transaction.pk %}">
+      {% csrf_token %}
+      <div class="mb-2">
+        <label class="form-label" for="payment-reversal-reason">Reason for reversal</label>
+        <input id="payment-reversal-reason" class="form-control" name="reason" required
+               value="Payment reversal: ">
+      </div>
+      <button type="submit" class="btn btn-outline-danger">Reverse Payment</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+<a href="{% url 'trust:payment_pdf' payment.pk %}" class="btn btn-primary">Download PDF</a>
+<a href="{% url 'trust:account_detail' payment.transaction.matter_ledger.trust_account.pk %}" class="btn btn-secondary">Back to Account</a>
+{% endblock %}

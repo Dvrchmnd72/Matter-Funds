@@ -1,20 +1,98 @@
 {% extends "base.html" %}
 {% block title %}Receipt #{{ receipt.receipt_number }} – Matter Funds{% endblock %}
 {% block content %}
-<h1>Receipt #{{ receipt.receipt_number }}</h1>
+<h1>Trust Account Receipt #{{ receipt.receipt_number }}</h1>
+
 <dl class="row">
-  <dt class="col-sm-3">Payor</dt><dd class="col-sm-9">{{ receipt.payor_name }}</dd>
-  <dt class="col-sm-3">Amount</dt><dd class="col-sm-9">${{ receipt.transaction.amount }}</dd>
-  <dt class="col-sm-3">Date receipt made out</dt><dd class="col-sm-9">{{ receipt.date_made_out }}</dd>
-  <dt class="col-sm-3">Date received / confirmed in trust account</dt><dd class="col-sm-9">{{ receipt.transaction.date_received_or_paid }}</dd>
+  <dt class="col-sm-4">Law practice name</dt>
+  <dd class="col-sm-8">{{ receipt.transaction.matter_ledger.trust_account.firm.name }}</dd>
+
+  <dt class="col-sm-4">Expression</dt>
+  <dd class="col-sm-8">Trust Account</dd>
+
+  <dt class="col-sm-4">Trust account</dt>
+  <dd class="col-sm-8">{{ receipt.transaction.matter_ledger.trust_account.name }}</dd>
+
+  <dt class="col-sm-4">BSB / Account number</dt>
+  <dd class="col-sm-8">{{ receipt.transaction.matter_ledger.trust_account.bsb }} / {{ receipt.transaction.matter_ledger.trust_account.account_number }}</dd>
+
+  <dt class="col-sm-4">Receipt number</dt>
+  <dd class="col-sm-8">{{ receipt.receipt_number }}</dd>
+
+  <dt class="col-sm-4">Date receipt made out</dt>
+  <dd class="col-sm-8">{{ receipt.date_made_out }}</dd>
+
+  <dt class="col-sm-4">Date money received, if different</dt>
+  <dd class="col-sm-8">
+    {% if receipt.transaction.date_received_or_paid == receipt.date_made_out %}
+      —
+    {% else %}
+      {{ receipt.transaction.date_received_or_paid }}
+    {% endif %}
+  </dd>
+
   {% if receipt.uses_separate_deposit_date %}
-  <dt class="col-sm-3">Date deposited to trust account</dt><dd class="col-sm-9">{{ receipt.transaction.date_banked|default:"–" }}</dd>
+  <dt class="col-sm-4">Date deposited to trust account</dt>
+  <dd class="col-sm-8">{{ receipt.transaction.date_banked|default:"—" }}</dd>
   {% endif %}
-  <dt class="col-sm-3">Payment Method</dt><dd class="col-sm-9">{{ receipt.get_payment_method_display }}</dd>
-  <dt class="col-sm-3">Purpose</dt><dd class="col-sm-9">{{ receipt.purpose }}</dd>
-  <dt class="col-sm-3">Deposit delay — review if not deposited as soon as practicable</dt><dd class="col-sm-9">{{ receipt.late_banking|yesno:"Yes,No" }}</dd>
-  <dt class="col-sm-3">Matter</dt><dd class="col-sm-9">{{ receipt.transaction.matter_ledger.matter }}</dd>
+
+  <dt class="col-sm-4">Amount received</dt>
+  <dd class="col-sm-8">${{ receipt.transaction.amount }}</dd>
+
+  <dt class="col-sm-4">Form in which money was received</dt>
+  <dd class="col-sm-8">{{ receipt.get_payment_method_display }}</dd>
+
+  {% if receipt.cheque_number %}
+  <dt class="col-sm-4">Cheque number</dt>
+  <dd class="col-sm-8">{{ receipt.cheque_number }}</dd>
+  {% endif %}
+
+  <dt class="col-sm-4">Received from</dt>
+  <dd class="col-sm-8">{{ receipt.payor_name }}</dd>
+
+  <dt class="col-sm-4">For and on behalf of / client</dt>
+  <dd class="col-sm-8">{{ receipt.transaction.matter_ledger.matter.client.name }}</dd>
+
+  <dt class="col-sm-4">Matter reference</dt>
+  <dd class="col-sm-8">{{ receipt.transaction.matter_ledger.matter.file_number }}</dd>
+
+  <dt class="col-sm-4">Matter description</dt>
+  <dd class="col-sm-8">{{ receipt.transaction.matter_ledger.matter.description }}</dd>
+
+  <dt class="col-sm-4">Reason / purpose</dt>
+  <dd class="col-sm-8">{{ receipt.purpose }}</dd>
+
+  <dt class="col-sm-4">Made out by</dt>
+  <dd class="col-sm-8">{{ receipt.transaction.created_by }}</dd>
+
+  <dt class="col-sm-4">Deposit delay — review if not deposited as soon as practicable</dt>
+  <dd class="col-sm-8">{{ receipt.late_banking|yesno:"Yes,No" }}</dd>
 </dl>
+
+{% if receipt.transaction.is_reversed %}
+<div class="alert alert-warning">
+  This receipt has been reversed. The original receipt remains retained as a trust record.
+</div>
+{% else %}
+<div class="card my-3">
+  <div class="card-body">
+    <h2 class="h5">Reverse issued receipt</h2>
+    <p class="text-muted mb-2">
+      Use this only where an issued receipt needs correction, including dishonour. This is not a pre-issue cancelled receipt workflow.
+    </p>
+    <form method="post" action="{% url 'trust:transaction_reverse' receipt.transaction.pk %}">
+      {% csrf_token %}
+      <div class="mb-2">
+        <label class="form-label" for="receipt-reversal-reason">Reason for reversal</label>
+        <input id="receipt-reversal-reason" class="form-control" name="reason" required
+               value="Receipt reversal: ">
+      </div>
+      <button type="submit" class="btn btn-outline-danger">Reverse Receipt</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
 <a href="{% url 'trust:receipt_pdf' receipt.pk %}" class="btn btn-primary">Download PDF</a>
 <a href="{% url 'trust:account_detail' receipt.transaction.matter_ledger.trust_account.pk %}" class="btn btn-secondary">Back to Account</a>
 {% endblock %}

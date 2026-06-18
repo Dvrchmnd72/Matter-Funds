@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Reversal #{{ reversal.pk }} – Matter Funds{% endblock %}
+{% block content %}
+<h1>Trust Transaction Reversal #{{ reversal.pk }}</h1>
+
+<dl class="row">
+  <dt class="col-sm-4">Trust account</dt>
+  <dd class="col-sm-8">{{ reversal.matter_ledger.trust_account }}</dd>
+
+  <dt class="col-sm-4">Reversal date</dt>
+  <dd class="col-sm-8">{{ reversal.date_received_or_paid }}</dd>
+
+  <dt class="col-sm-4">Amount reversed</dt>
+  <dd class="col-sm-8">${{ reversal.amount }}</dd>
+
+  <dt class="col-sm-4">Reversal reason</dt>
+  <dd class="col-sm-8">{{ reversal.description }}</dd>
+
+  <dt class="col-sm-4">Matter / ledger</dt>
+  <dd class="col-sm-8">{{ reversal.matter_ledger.matter }}</dd>
+
+  <dt class="col-sm-4">Client</dt>
+  <dd class="col-sm-8">{{ reversal.matter_ledger.matter.client.name }}</dd>
+
+  <dt class="col-sm-4">Original transaction</dt>
+  <dd class="col-sm-8">
+    Transaction #{{ reversal.reverses.pk }} —
+    {{ reversal.reverses.get_transaction_type_display }} —
+    {{ reversal.reverses.date_received_or_paid }} —
+    ${{ reversal.reverses.amount }}
+  </dd>
+
+  <dt class="col-sm-4">Original description</dt>
+  <dd class="col-sm-8">{{ reversal.reverses.description }}</dd>
+
+  <dt class="col-sm-4">Created by</dt>
+  <dd class="col-sm-8">{{ reversal.created_by }}</dd>
+
+  <dt class="col-sm-4">Record treatment</dt>
+  <dd class="col-sm-8">
+    Original source record remains retained. This reversal is recorded separately and is not a deletion or cancellation of the original record.
+  </dd>
+</dl>
+
+<div class="mb-3">
+  {% if reversal.reverses.transaction_type == 'receipt' and reversal.reverses.receipt %}
+    <a href="{% url 'trust:receipt_detail' reversal.reverses.receipt.pk %}" class="btn btn-outline-secondary">View Original Receipt</a>
+    <a href="{% url 'trust:receipt_pdf' reversal.reverses.receipt.pk %}" class="btn btn-outline-primary">Original Receipt PDF</a>
+  {% elif reversal.reverses.payment %}
+    <a href="{% url 'trust:payment_detail' reversal.reverses.payment.pk %}" class="btn btn-outline-secondary">View Original Payment</a>
+    <a href="{% url 'trust:payment_pdf' reversal.reverses.payment.pk %}" class="btn btn-outline-primary">Original Payment PDF</a>
+  {% endif %}
+</div>
+
+<a href="{% url 'trust:reversal_pdf' reversal.pk %}" class="btn btn-primary">Download Reversal PDF</a>
+<a href="{% url 'trust:account_detail' reversal.matter_ledger.trust_account.pk %}" class="btn btn-secondary">Back to Account</a>
+{% endblock %}

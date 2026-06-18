@@ -8,8 +8,34 @@ from apps.matters.models import Matter
 from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement
 
 
+class TrustAccountUpdateForm(forms.ModelForm):
+    class Meta:
+        model = TrustAccount
+        fields = [
+            'name', 'bank', 'bsb', 'account_number',
+            'opened_on', 'law_society_opening_notice_sent_on',
+            'closed_on', 'law_society_closure_notice_sent_on', 'is_active',
+        ]
+        widgets = {
+            'opened_on': forms.DateInput(attrs={'type': 'date'}),
+            'law_society_opening_notice_sent_on': forms.DateInput(attrs={'type': 'date'}),
+            'closed_on': forms.DateInput(attrs={'type': 'date'}),
+            'law_society_closure_notice_sent_on': forms.DateInput(attrs={'type': 'date'}),
+        }
+        labels = {
+            'law_society_opening_notice_sent_on': 'Law Society opening notice sent on',
+            'law_society_closure_notice_sent_on': 'Law Society closure notice sent on',
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.helper = FormHelper()
+        self.helper.form_tag = False
+        self.helper.add_input(Submit('submit', 'Save Trust Account Details'))
+
+
 class ReceiptForm(forms.Form):
-    amount = forms.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
+    amount = forms.DecimalField(label='Amount received', max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
     date_received = forms.DateField(
         label='Date received / confirmed in trust account',
         help_text=(
@@ -25,12 +51,20 @@ class ReceiptForm(forms.Form):
         widget=forms.DateInput(attrs={'type': 'date'}),
         required=False,
     )
-    payor_name = forms.CharField(max_length=255)
-    payment_method = forms.ChoiceField(choices=[
-        ('cash', 'Cash'), ('cheque', 'Cheque'), ('eft', 'EFT'), ('direct_deposit', 'Direct Deposit'),
-    ])
-    cheque_number = forms.CharField(max_length=50, required=False)
-    purpose = forms.CharField(max_length=500)
+    payor_name = forms.CharField(label='Received from', max_length=255)
+    payment_method = forms.ChoiceField(
+        label='Form in which money was received',
+        help_text='For credit card trust receipts, receipt the full amount credited to trust. Merchant/card fees must not be deducted from trust money.',
+        choices=[
+            ('cash', 'Cash'),
+            ('cheque', 'Cheque'),
+            ('eft', 'EFT'),
+            ('direct_deposit', 'Direct Deposit'),
+            ('credit_card', 'Credit Card'),
+        ],
+    )
+    cheque_number = forms.CharField(label='Cheque number, if applicable', max_length=50, required=False)
+    purpose = forms.CharField(label='Reason / purpose for which money was received', max_length=500)
 
     def clean_date_received(self):
         date_received = self.cleaned_data['date_received']
@@ -61,20 +95,56 @@ class ReceiptForm(forms.Form):
 
 
 class PaymentForm(forms.Form):
-    amount = forms.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
-    date_paid = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}), initial=timezone.localdate)
-    payee_name = forms.CharField(max_length=255)
-    payee_bsb = forms.CharField(max_length=7, required=False)
-    payee_account = forms.CharField(max_length=20, required=False)
-    payment_method = forms.ChoiceField(choices=[('cheque', 'Cheque'), ('eft', 'EFT')])
-    cheque_number = forms.CharField(max_length=50, required=False)
-    purpose = forms.CharField(max_length=500)
+    amount = forms.DecimalField(
+        label='Amount ordered to be paid',
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal('0.01'),
+    )
+    date_paid = forms.DateField(
+        label='Date of cheque / EFT',
+        widget=forms.DateInput(attrs={'type': 'date'}),
+        initial=timezone.localdate,
+    )
+    payee_name = forms.CharField(label='Pay to / payee', max_length=255)
+    payee_bsb = forms.CharField(label='Payee BSB', max_length=7, required=False)
+    payee_account = forms.CharField(label='Payee account number', max_length=20, required=False)
+    payment_method = forms.ChoiceField(
+        label='Withdrawal method',
+        choices=[('cheque', 'Cheque'), ('eft', 'EFT')],
+        help_text='Trust withdrawals must be made by cheque or EFT only.'
+    )
+    cheque_number = forms.CharField(
+        label='Cheque number',
+        max_length=50,
+        required=False,
+        help_text='Required for cheque payments. EFT payments use the generated payment number as the EFT reference.'
+    )
+    purpose = forms.CharField(label='Reason / purpose of payment', max_length=500)
 
     def clean_date_paid(self):
         date_paid = self.cleaned_data['date_paid']
         if date_paid > timezone.localdate():
             raise forms.ValidationError('Trust payment date paid cannot be future-dated.')
         return date_paid
+
+    def clean(self):
+        cleaned_data = super().clean()
+        method = cleaned_data.get('payment_method')
+        cheque_number = cleaned_data.get('cheque_number')
+        payee_bsb = cleaned_data.get('payee_bsb')
+        payee_account = cleaned_data.get('payee_account')
+
+        if method == 'cheque' and not cheque_number:
+            self.add_error('cheque_number', 'Cheque number is required for cheque trust payments.')
+
+        if method == 'eft':
+            if not payee_bsb:
+                self.add_error('payee_bsb', 'Payee BSB is required for EFT trust payments.')
+            if not payee_account:
+                self.add_error('payee_account', 'Payee account number is required for EFT trust payments.')
+
+        return cleaned_data
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -98,7 +168,7 @@ class TransferCostsToOfficeForm(forms.Form):
         required=False,
         help_text='Optional key date for examiner reference, such as bill, authority, or reimbursement date.',
     )
-    costs_evidence_file = forms.FileField(required=False, help_text='Primary evidence, such as bill, authority, agreement, or evidence bundle.')
+    costs_evidence_file = forms.FileField(required=False, help_text='Optional: upload primary evidence such as bill, authority, agreement, or evidence bundle retained for examiner review.')
     notice_or_request_file = forms.FileField(required=False)
     authority_or_agreement_file = forms.FileField(required=False)
     reimbursement_evidence_file = forms.FileField(required=False)
@@ -118,19 +188,9 @@ class TransferCostsToOfficeForm(forms.Form):
 
     def clean(self):
         cleaned_data = super().clean()
-        method = cleaned_data.get('costs_withdrawal_method')
-        evidence_fields = [
-            'costs_evidence_file',
-            'notice_or_request_file',
-            'authority_or_agreement_file',
-            'reimbursement_evidence_file',
-        ]
-        if not any(cleaned_data.get(field) for field in evidence_fields):
-            raise forms.ValidationError('At least one costs withdrawal evidence document is required.')
-        if method in ('method_2_authority', 'method_4_commercial_government') and not cleaned_data.get('authority_or_agreement_file'):
-            self.add_error('authority_or_agreement_file', 'Authority or agreement evidence is required for this withdrawal method.')
-        if method == 'method_3_reimbursement' and not cleaned_data.get('reimbursement_evidence_file'):
-            self.add_error('reimbursement_evidence_file', 'Reimbursement evidence is required for Method 3 withdrawals.')
+        # Supporting evidence should be retained for examiner review, but the
+        # platform should not block the trust transaction solely because the
+        # document is not uploaded at the time of entry.
         return cleaned_data
 
 
@@ -158,25 +218,51 @@ class ManualIrregularityForm(forms.ModelForm):
         self.helper.add_input(Submit('submit', 'Create Irregularity'))
 
 
+class MatterLedgerChoiceField(forms.ModelChoiceField):
+    def label_from_instance(self, obj):
+        matter = obj.matter
+        client_name = getattr(matter.client, "name", "")
+        return f"{matter.file_number} - {matter.description} - {client_name} - Balance ${obj.balance}"
+
+
 class TrustJournalForm(forms.Form):
-    from_ledger = forms.ModelChoiceField(queryset=MatterLedger.objects.none(), label='From Ledger')
-    to_ledger = forms.ModelChoiceField(queryset=MatterLedger.objects.none(), label='To Ledger')
-    amount = forms.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal('0.01'))
-    description = forms.CharField(max_length=500)
-    written_authority = forms.FileField(label='Written Authority Document')
-    authority_date = forms.DateField(widget=forms.DateInput(attrs={'type': 'date'}))
-    authority_signed_by = forms.CharField(max_length=255)
+    from_ledger = MatterLedgerChoiceField(
+        queryset=MatterLedger.objects.none(),
+        label='From matter ledger',
+        help_text='The matter ledger losing the trust money.'
+    )
+    to_ledger = MatterLedgerChoiceField(
+        queryset=MatterLedger.objects.none(),
+        label='To matter ledger',
+        help_text='The matter ledger receiving the trust money. Must be a different matter ledger under the same trust account.'
+    )
+    amount = forms.DecimalField(
+        label='Amount to transfer',
+        max_digits=12,
+        decimal_places=2,
+        min_value=Decimal('0.01')
+    )
+    description = forms.CharField(
+        label='Reason / purpose of transfer',
+        max_length=500
+    )
+    written_authority = forms.FileField(label='Written authority / transfer request document')
+    authority_date = forms.DateField(
+        label='Authority date',
+        widget=forms.DateInput(attrs={'type': 'date'})
+    )
+    authority_signed_by = forms.CharField(label='Authority signed by', max_length=255)
 
     def __init__(self, *args, **kwargs):
         trust_account = kwargs.pop('trust_account', None)
         super().__init__(*args, **kwargs)
         if trust_account:
-            qs = MatterLedger.objects.filter(trust_account=trust_account).select_related('matter')
+            qs = MatterLedger.objects.filter(trust_account=trust_account).select_related('matter', 'matter__client').order_by('matter__file_number', 'pk')
             self.fields['from_ledger'].queryset = qs
             self.fields['to_ledger'].queryset = qs
         self.helper = FormHelper()
         self.helper.form_tag = False
-        self.helper.add_input(Submit('submit', 'Create Journal'))
+        self.helper.add_input(Submit('submit', 'Create Trust Journal Transfer'))
 
 
 class ReconciliationForm(forms.ModelForm):

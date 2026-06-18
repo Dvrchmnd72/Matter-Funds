@@ -435,6 +435,7 @@ class Receipt(models.Model):
         ('cheque', 'Cheque'),
         ('eft', 'EFT'),
         ('direct_deposit', 'Direct Deposit'),
+        ('credit_card', 'Credit Card'),
     ]
 
     transaction = models.OneToOneField(TrustTransaction, on_delete=models.PROTECT, related_name='receipt')

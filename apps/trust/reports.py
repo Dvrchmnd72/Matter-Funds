@@ -9,7 +9,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 try:
-    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import cm
     from reportlab.lib import colors
     from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
@@ -94,39 +94,135 @@ def receipts_journal_pdf(trust_account, date_from, date_to):
 def receipts_cash_book_pdf_bytes(trust_account, date_from, date_to):
     transactions = (
         TrustTransaction.objects
+        .filter(matter_ledger__trust_account=trust_account)
         .filter(
-            transaction_type='receipt',
-            matter_ledger__trust_account=trust_account,
-            created_at__date__range=(date_from, date_to),
+            Q(transaction_type='receipt', created_at__date__range=(date_from, date_to))
+            | Q(transaction_type='reversal', reverses__transaction_type='receipt', date_received_or_paid__range=(date_from, date_to))
         )
-        .select_related('matter_ledger__matter', 'receipt')
-        .order_by('created_at', 'receipt__receipt_number', 'pk')
+        .select_related('matter_ledger__matter', 'receipt', 'reverses', 'reverses__receipt')
+        .order_by('date_received_or_paid', 'created_at', 'pk')
     )
 
     buffer = io.BytesIO()
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
+    styles = getSampleStyleSheet()
+    title_style = styles["Heading1"]
+    normal = styles["Normal"].clone("receipts_cash_book_cell")
+    normal.fontSize = 6
+    normal.leading = 7
+
+    header_style = styles["Normal"].clone("receipts_cash_book_header")
+    header_style.fontName = "Helvetica-Bold"
+    header_style.fontSize = 6
+    header_style.leading = 7
+    header_style.textColor = colors.whitesmoke
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=1.0 * cm,
+        rightMargin=1.0 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+    )
+
+    elements = [Paragraph("Trust Receipts Cash Book", title_style)]
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, styles["Normal"]))
+    elements.append(Paragraph(f"Period: {date_from} to {date_to}", styles["Normal"]))
+    elements.append(Spacer(1, 0.3 * cm))
+
     col_headers = [
-        'Date receipt made out', 'Date received / confirmed in trust account (if different)',
-        'Date deposited to trust account', 'Receipt #', 'Matter', 'Payor', 'Method', 'Amount ($)', 'Reason', 'Ledger credited'
+        "Date recorded",
+        "Date received if different",
+        "Date deposited",
+        "Receipt / ref",
+        "Matter",
+        "Received from / reason",
+        "Form",
+        "Receipt amt",
+        "Deposited amt",
+        "Ledger",
     ]
+
     rows = []
     for txn in transactions:
-        r = getattr(txn, 'receipt', None)
-        date_made_out = r.date_made_out if r else None
+        if txn.transaction_type == 'reversal' and txn.reverses_id:
+            original = txn.reverses
+            try:
+                receipt = original.receipt
+            except Exception:
+                receipt = None
+
+            matter = txn.matter_ledger.matter
+            rows.append([
+                str(txn.date_received_or_paid),
+                "",
+                "",
+                f"Receipt #{receipt.receipt_number} reversal" if receipt else f"Txn #{original.pk} reversal",
+                str(matter),
+                txn.description,
+                receipt.get_payment_method_display() if receipt else "",
+                f"-{txn.amount}",
+                "",
+                str(txn.matter_ledger),
+            ])
+            continue
+
+        try:
+            receipt = txn.receipt
+        except Exception:
+            receipt = None
+
+        date_made_out = receipt.date_made_out if receipt else timezone.localdate(txn.created_at)
+        date_received = txn.date_received_or_paid
+        date_received_if_different = str(date_received) if date_received != date_made_out else ""
+        date_deposited = str(txn.date_banked or "") if receipt and receipt.uses_separate_deposit_date else ""
+        amount_deposited = str(txn.amount) if date_deposited else ""
+
         rows.append([
-            str(date_made_out or ''),
-            str(txn.date_received_or_paid) if txn.date_received_or_paid != date_made_out else '',
-            str(txn.date_banked or ''),
-            str(r.receipt_number) if r else '',
+            str(date_made_out or ""),
+            date_received_if_different,
+            date_deposited,
+            str(receipt.receipt_number) if receipt else "",
             str(txn.matter_ledger.matter),
-            r.payor_name if r else '',
-            r.get_payment_method_display() if r else '',
+            receipt.payor_name if receipt else txn.description,
+            receipt.get_payment_method_display() if receipt else "",
             str(txn.amount),
-            r.purpose if r else txn.description,
+            amount_deposited,
             str(txn.matter_ledger),
         ])
 
-    _build_pdf_document(buffer, trust_account, 'Trust Receipts Cash Book',
-                        f"{date_from} to {date_to}", rows, col_headers)
+    table_data = [[Paragraph(h, header_style) for h in col_headers]]
+    table_data += [
+        [Paragraph(str(cell or ""), normal) for cell in row]
+        for row in rows
+    ]
+
+    table = Table(
+        table_data,
+        colWidths=[
+            1.9 * cm, 2.3 * cm, 2.0 * cm, 2.2 * cm, 3.0 * cm,
+            4.0 * cm, 1.5 * cm, 1.9 * cm, 2.0 * cm, 4.9 * cm,
+        ],
+        repeatRows=1,
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("FONTSIZE", (0, 0), (-1, -1), 6),
+        ("PADDING", (0, 0), (-1, -1), 3),
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 0.3 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+    doc.build(elements)
+
     return buffer.getvalue()
 
 
@@ -140,33 +236,262 @@ def payments_journal_pdf(trust_account, date_from, date_to):
 def payments_cash_book_pdf_bytes(trust_account, date_from, date_to):
     transactions = (
         TrustTransaction.objects
+        .filter(matter_ledger__trust_account=trust_account)
         .filter(
-            transaction_type__in=['payment', 'transfer_to_office'],
-            matter_ledger__trust_account=trust_account,
-            date_received_or_paid__range=(date_from, date_to),
+            Q(transaction_type__in=['payment', 'transfer_to_office'], date_received_or_paid__range=(date_from, date_to))
+            | Q(transaction_type='reversal', reverses__transaction_type__in=['payment', 'transfer_to_office'], date_received_or_paid__range=(date_from, date_to))
         )
-        .select_related('matter_ledger__matter', 'payment')
-        .order_by('date_received_or_paid', 'payment__payment_number')
+        .select_related('matter_ledger__matter', 'payment', 'reverses', 'reverses__payment')
+        .order_by('date_received_or_paid', 'created_at', 'pk')
     )
 
     buffer = io.BytesIO()
-    col_headers = ['Date', 'Type', 'Payment #', 'Matter', 'Payee', 'Method', 'Amount ($)']
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
+    styles = getSampleStyleSheet()
+    title_style = styles["Heading1"]
+
+    normal = styles["Normal"].clone("payments_cash_book_cell")
+    normal.fontSize = 6
+    normal.leading = 7
+
+    header_style = styles["Normal"].clone("payments_cash_book_header")
+    header_style.fontName = "Helvetica-Bold"
+    header_style.fontSize = 6
+    header_style.leading = 7
+    header_style.textColor = colors.whitesmoke
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=1.0 * cm,
+        rightMargin=1.0 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+    )
+
+    elements = [Paragraph("Trust Payments Cash Book", title_style)]
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, styles["Normal"]))
+    elements.append(Paragraph(f"Period: {date_from} to {date_to}", styles["Normal"]))
+    elements.append(Spacer(1, 0.3 * cm))
+
+    col_headers = [
+        "Date paid",
+        "Type",
+        "Payment / EFT ref",
+        "Cheque #",
+        "Matter",
+        "Payee",
+        "Payee BSB / account",
+        "Method",
+        "Amount",
+        "Reason / purpose",
+        "Ledger debited",
+    ]
+
     rows = []
     for txn in transactions:
-        p = getattr(txn, 'payment', None)
+        if txn.transaction_type == 'reversal' and txn.reverses_id:
+            original = txn.reverses
+            try:
+                payment = original.payment
+            except Exception:
+                payment = None
+
+            method = payment.get_payment_method_display() if payment else ""
+            payee_bsb_account = ""
+            if payment and payment.payment_method == "eft" and (payment.payee_bsb or payment.payee_account):
+                payee_bsb_account = f"{payment.payee_bsb or ''} / {payment.payee_account or ''}"
+
+            rows.append([
+                str(txn.date_received_or_paid),
+                "Payment reversal",
+                str(payment.payment_number) if payment else f"Transaction #{original.pk}",
+                payment.cheque_number if payment and payment.cheque_number else "",
+                str(txn.matter_ledger.matter),
+                payment.payee_name if payment else "",
+                payee_bsb_account,
+                method,
+                f"-{txn.amount}",
+                txn.description,
+                str(txn.matter_ledger),
+            ])
+            continue
+
+        try:
+            payment = txn.payment
+        except Exception:
+            payment = None
+
+        payee_bsb_account = ""
+        if payment and payment.payment_method == "eft" and (payment.payee_bsb or payment.payee_account):
+            payee_bsb_account = f"{payment.payee_bsb or ''} / {payment.payee_account or ''}"
+
         rows.append([
             str(txn.date_received_or_paid),
             txn.get_transaction_type_display(),
-            str(p.payment_number) if p else '',
+            str(payment.payment_number) if payment else "",
+            payment.cheque_number if payment and payment.cheque_number else "",
             str(txn.matter_ledger.matter),
-            p.payee_name if p else '',
-            p.get_payment_method_display() if p else '',
+            payment.payee_name if payment else "",
+            payee_bsb_account,
+            payment.get_payment_method_display() if payment else "",
             str(txn.amount),
+            payment.purpose if payment else txn.description,
+            str(txn.matter_ledger),
         ])
 
-    _build_pdf_document(buffer, trust_account, 'Trust Payments Cash Book',
-                        f"{date_from} to {date_to}", rows, col_headers)
+    table_data = [[Paragraph(h, header_style) for h in col_headers]]
+    table_data += [[Paragraph(str(cell or ""), normal) for cell in row] for row in rows]
+
+    table = Table(
+        table_data,
+        colWidths=[
+            1.7 * cm, 1.7 * cm, 1.9 * cm, 2.5 * cm, 2.6 * cm,
+            2.7 * cm, 2.8 * cm, 1.4 * cm, 1.5 * cm, 3.8 * cm, 4.8 * cm,
+        ],
+        repeatRows=1,
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("FONTSIZE", (0, 0), (-1, -1), 6),
+        ("PADDING", (0, 0), (-1, -1), 3),
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 0.3 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+    doc.build(elements)
+
     return buffer.getvalue()
+
+
+def _cash_book_amounts_for_period(trust_account, date_from, date_to):
+    """Return opening, receipts, payments, and closing cash book balances."""
+    def receipt_total(qs):
+        total = Decimal("0.00")
+        for txn in qs:
+            if txn.transaction_type == "receipt":
+                total += txn.amount
+            elif txn.transaction_type == "reversal" and txn.reverses and txn.reverses.transaction_type == "receipt":
+                total -= txn.amount
+        return total
+
+    def payment_total(qs):
+        total = Decimal("0.00")
+        for txn in qs:
+            if txn.transaction_type in ("payment", "transfer_to_office"):
+                total += txn.amount
+            elif txn.transaction_type == "reversal" and txn.reverses and txn.reverses.transaction_type in ("payment", "transfer_to_office"):
+                total -= txn.amount
+        return total
+
+    before = (
+        TrustTransaction.objects
+        .filter(matter_ledger__trust_account=trust_account, date_received_or_paid__lt=date_from)
+        .select_related("reverses")
+        .order_by("date_received_or_paid", "created_at", "pk")
+    )
+    period = (
+        TrustTransaction.objects
+        .filter(matter_ledger__trust_account=trust_account, date_received_or_paid__range=(date_from, date_to))
+        .select_related("reverses")
+        .order_by("date_received_or_paid", "created_at", "pk")
+    )
+
+    opening = Decimal("0.00")
+    for txn in before:
+        if txn.transaction_type in ("receipt",):
+            opening += txn.amount
+        elif txn.transaction_type in ("payment", "transfer_to_office"):
+            opening -= txn.amount
+        elif txn.transaction_type == "reversal" and txn.reverses:
+            if txn.reverses.transaction_type == "receipt":
+                opening -= txn.amount
+            elif txn.reverses.transaction_type in ("payment", "transfer_to_office"):
+                opening += txn.amount
+
+    receipts = receipt_total(period)
+    payments = payment_total(period)
+    closing = opening + receipts - payments
+    return opening, receipts, payments, closing
+
+
+def trust_cash_book_summary_pdf_bytes(trust_account, date_from, date_to):
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
+    opening, receipts, payments, closing = _cash_book_amounts_for_period(trust_account, date_from, date_to)
+    subtotal = opening + receipts
+
+    buffer = io.BytesIO()
+    styles = getSampleStyleSheet()
+    normal = styles["Normal"]
+    label_style = styles["Normal"]
+    label_style.fontName = "Helvetica-Bold"
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+    )
+
+    elements = [Paragraph("Trust Cash Book Summary", styles["Heading1"])]
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, normal))
+    elements.append(Paragraph(f"Period: {date_from} to {date_to}", normal))
+    elements.append(Spacer(1, 0.4 * cm))
+
+    rows = [
+        ["Opening balance", f"As at day before {date_from}", f"${opening}"],
+        ["Plus receipts for period", f"{date_from} to {date_to}", f"${receipts}"],
+        ["Subtotal", "", f"${subtotal}"],
+        ["Less payments for period", f"{date_from} to {date_to}", f"${payments}"],
+        ["Closing cash book balance", f"As at {date_to}", f"${closing}"],
+    ]
+
+    table_data = [
+        [Paragraph("Item", label_style), Paragraph("Reference", label_style), Paragraph("Amount", label_style)]
+    ]
+    table_data += [[Paragraph(str(c), normal) for c in row] for row in rows]
+
+    table = Table(table_data, colWidths=[6.2 * cm, 6.2 * cm, 4.0 * cm], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 0.4 * cm))
+    elements.append(Paragraph(
+        "Summary derived from the Matter Funds trust receipts cash book and trust payments cash book. "
+        "Trust journal transfers do not affect the trust cash book balance.",
+        styles["Italic"],
+    ))
+    elements.append(Spacer(1, 0.2 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+    doc.build(elements)
+
+    return buffer.getvalue()
+
+
+def trust_cash_book_summary_pdf(trust_account, date_from, date_to):
+    return _pdf_response_from_bytes(
+        f"trust_cash_book_summary_{date_from}_{date_to}.pdf",
+        trust_cash_book_summary_pdf_bytes(trust_account, date_from, date_to),
+    )
 
 
 def trust_transfer_journal_pdf_bytes(trust_account, date_from, date_to):
@@ -176,23 +501,136 @@ def trust_transfer_journal_pdf_bytes(trust_account, date_from, date_to):
             from_ledger__trust_account=trust_account,
             journal_out_txn__date_received_or_paid__range=(date_from, date_to),
         )
-        .select_related('from_ledger__matter', 'to_ledger__matter', 'journal_out_txn')
+        .select_related(
+            'from_ledger__matter__client',
+            'to_ledger__matter__client',
+            'journal_out_txn',
+            'created_by',
+        )
         .order_by('journal_out_txn__date_received_or_paid', 'pk')
     )
+
     buffer = io.BytesIO()
-    col_headers = ['Date', 'From Matter', 'To Matter', 'Amount ($)', 'Description', 'Authority Date', 'Authority Signed By']
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
+    styles = getSampleStyleSheet()
+
+    title_style = styles["Heading1"]
+
+    normal = styles["Normal"].clone("transfer_journal_normal")
+    normal.fontSize = 6
+    normal.leading = 7
+    normal.textColor = colors.black
+
+    header_style = styles["Normal"].clone("transfer_journal_header")
+    header_style.fontName = "Helvetica-Bold"
+    header_style.fontSize = 6
+    header_style.leading = 7
+    header_style.textColor = colors.whitesmoke
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=1.0 * cm,
+        rightMargin=1.0 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+    )
+
+    elements = [Paragraph("Trust Transfer Journal", title_style)]
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, styles["Normal"]))
+    elements.append(Paragraph(f"Period: {date_from} to {date_to}", styles["Normal"]))
+    elements.append(Spacer(1, 0.3 * cm))
+
+    col_headers = [
+        "Date",
+        "Journal Ref",
+        "From ledger account",
+        "To ledger account",
+        "Reason",
+        "Debit",
+        "Credit",
+        "Authority date",
+        "Authorised by",
+    ]
+
     rows = []
     for journal in journals:
+        from_matter = journal.from_ledger.matter
+        to_matter = journal.to_ledger.matter
+
+        from_details = (
+            f"{from_matter.client.name}\n"
+            f"Ref: {from_matter.file_number or journal.from_ledger_id}\n"
+            f"{from_matter.description}"
+        )
+        to_details = (
+            f"{to_matter.client.name}\n"
+            f"Ref: {to_matter.file_number or journal.to_ledger_id}\n"
+            f"{to_matter.description}"
+        )
+
         rows.append([
-            str(journal.journal_out_txn.date_received_or_paid) if journal.journal_out_txn else '',
-            str(journal.from_ledger.matter),
-            str(journal.to_ledger.matter),
-            str(journal.amount),
+            str(journal.journal_out_txn.date_received_or_paid) if journal.journal_out_txn else "",
+            f"J{journal.pk}",
+            from_details,
+            to_details,
             journal.description,
+            f"${journal.amount}",
+            f"${journal.amount}",
             str(journal.authority_date),
             journal.authority_signed_by,
         ])
-    _build_pdf_document(buffer, trust_account, 'Trust Transfer Journal', f"{date_from} to {date_to}", rows, col_headers)
+
+    if not rows:
+        rows.append(["", "", "No trust transfer journal entries for this period", "", "", "", "", "", ""])
+
+    table_data = [[Paragraph(h, header_style) for h in col_headers]]
+    table_data += [[Paragraph(str(cell or "").replace("\n", "<br/>"), normal) for cell in row] for row in rows]
+
+    table = Table(
+        table_data,
+        colWidths=[
+            1.8 * cm,
+            1.8 * cm,
+            4.4 * cm,
+            4.4 * cm,
+            5.2 * cm,
+            1.8 * cm,
+            1.8 * cm,
+            2.2 * cm,
+            3.8 * cm,
+        ],
+        repeatRows=1,
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (5, 1), (6, -1), "RIGHT"),
+        ("PADDING", (0, 0), (-1, -1), 3),
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 0.35 * cm))
+    elements.append(Paragraph(
+        "Debit: the trust ledger account from which funds are transferred. "
+        "Credit: the trust ledger account to which funds are transferred. "
+        "Trust journal transfers do not affect the trust cash book/control account.",
+        styles["Italic"],
+    ))
+    elements.append(Spacer(1, 0.2 * cm))
+    elements.append(Paragraph(
+        "Authority particulars are recorded from the trust journal transfer request / written authority retained with the journal entry.",
+        styles["Italic"],
+    ))
+    elements.append(Spacer(1, 0.2 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+
+    doc.build(elements)
     return buffer.getvalue()
 
 
@@ -204,36 +642,259 @@ def trust_transfer_journal_pdf(trust_account, date_from, date_to):
 
 
 def matter_ledger_statement_pdf(matter_ledger):
+    """Generate a Rule 47-friendly trust ledger account statement."""
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
     transactions = (
         TrustTransaction.objects
         .filter(matter_ledger=matter_ledger)
-        .order_by('date_received_or_paid', 'created_at')
+        .select_related(
+            "receipt",
+            "payment",
+            "reverses",
+            "reverses__receipt",
+            "reverses__payment",
+            "journal_as_out__to_ledger__matter__client",
+            "journal_as_in__from_ledger__matter__client",
+            "matter_ledger__matter__client",
+        )
+        .order_by("date_received_or_paid", "created_at", "pk")
     )
 
-    buffer = io.BytesIO()
     trust_account = matter_ledger.trust_account
-    col_headers = ['Date', 'Type', 'Description', 'Debit ($)', 'Credit ($)', 'Balance ($)']
+    matter = matter_ledger.matter
+    client = matter.client
+
+    buffer = io.BytesIO()
+    styles = getSampleStyleSheet()
+
+    normal = styles["Normal"].clone("trust_ledger_normal")
+    normal.fontSize = 6
+    normal.leading = 7
+    normal.textColor = colors.black
+
+    header_style = styles["Normal"].clone("trust_ledger_header")
+    header_style.fontName = "Helvetica-Bold"
+    header_style.fontSize = 6
+    header_style.leading = 7
+    header_style.textColor = colors.whitesmoke
+
+    title_label = styles["Normal"].clone("trust_ledger_title_label")
+    title_label.fontName = "Helvetica-Bold"
+    title_label.fontSize = 8
+    title_label.leading = 10
+    title_label.textColor = colors.black
+
+    title_value = styles["Normal"].clone("trust_ledger_title_value")
+    title_value.fontSize = 8
+    title_value.leading = 10
+    title_value.textColor = colors.black
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=1.0 * cm,
+        rightMargin=1.0 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+    )
+
+    elements = [Paragraph("Trust Ledger Account", styles["Heading1"])]
+
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, title_value))
+
+    elements.append(Spacer(1, 0.25 * cm))
+
+    title_rows = [
+        ["Account Name", client.name],
+        ["Address", client.address or ""],
+        ["Matter Reference", matter.file_number or ""],
+        ["Matter Description", matter.description or ""],
+        ["Responsible Legal Practitioner", str(matter.responsible_lawyer) if getattr(matter, "responsible_lawyer_id", None) else ""],
+        ["Responsible Principal", str(matter.responsible_lawyer) if getattr(matter, "responsible_lawyer_id", None) else ""],
+    ]
+
+    title_table = Table(
+        [[Paragraph(a, title_label), Paragraph(str(b or ""), title_value)] for a, b in title_rows],
+        colWidths=[5.0 * cm, 22.0 * cm],
+    )
+    title_table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.3, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("PADDING", (0, 0), (-1, -1), 4),
+    ]))
+    elements.append(title_table)
+    elements.append(Spacer(1, 0.35 * cm))
+
+    def receipt_ref(receipt):
+        return f"R{receipt.receipt_number}" if receipt else ""
+
+    def payment_ref(payment):
+        return f"P{payment.payment_number}" if payment else ""
+
+    def reference_for(txn):
+        try:
+            if txn.transaction_type == "receipt":
+                return receipt_ref(txn.receipt)
+            if txn.transaction_type in ("payment", "transfer_to_office"):
+                return payment_ref(txn.payment)
+            if txn.transaction_type == "journal_out" and hasattr(txn, "journal_as_out"):
+                return f"J{txn.journal_as_out.pk}"
+            if txn.transaction_type == "journal_in" and hasattr(txn, "journal_as_in"):
+                return f"J{txn.journal_as_in.pk}"
+            if txn.transaction_type == "reversal" and txn.reverses_id:
+                original = txn.reverses
+                if original.transaction_type == "receipt":
+                    return f"{receipt_ref(original.receipt)} reversal"
+                if original.transaction_type in ("payment", "transfer_to_office"):
+                    return f"{payment_ref(original.payment)} reversal"
+                return f"Txn {original.pk} reversal"
+        except Exception:
+            return f"Txn {txn.pk}"
+        return f"Txn {txn.pk}"
+
+    def transaction_type_label(txn):
+        if txn.transaction_type == "reversal" and txn.reverses_id:
+            original = txn.reverses
+            if original.transaction_type == "receipt":
+                return "Receipt reversal"
+            if original.transaction_type in ("payment", "transfer_to_office"):
+                return "Payment reversal"
+            if original.transaction_type.startswith("journal"):
+                return "Journal reversal"
+        return txn.get_transaction_type_display()
+
+    def counterparty_for(txn):
+        try:
+            if txn.transaction_type == "receipt":
+                receipt = txn.receipt
+                extra = ""
+                if txn.date_received_or_paid != receipt.date_made_out:
+                    extra = f" | Date received: {txn.date_received_or_paid}"
+                return f"{receipt.payor_name}{extra}"
+
+            if txn.transaction_type in ("payment", "transfer_to_office"):
+                payment = txn.payment
+                details = payment.payee_name
+                if payment.payment_method == "eft" and (payment.payee_bsb or payment.payee_account):
+                    details += f" | EFT to {payment.payee_bsb or ''} / {payment.payee_account or ''}"
+                if payment.payment_method == "cheque" and payment.cheque_number:
+                    details += f" | Cheque {payment.cheque_number}"
+                return details
+
+            if txn.transaction_type == "journal_out" and hasattr(txn, "journal_as_out"):
+                j = txn.journal_as_out
+                other = j.to_ledger
+                return f"Journal to {other.matter.client.name} | {other.matter.file_number} | {other.matter.description}"
+
+            if txn.transaction_type == "journal_in" and hasattr(txn, "journal_as_in"):
+                j = txn.journal_as_in
+                other = j.from_ledger
+                return f"Journal from {other.matter.client.name} | {other.matter.file_number} | {other.matter.description}"
+
+            if txn.transaction_type == "reversal" and txn.reverses_id:
+                original = txn.reverses
+                if original.transaction_type == "receipt":
+                    return f"Reversal of receipt from {original.receipt.payor_name}"
+                if original.transaction_type in ("payment", "transfer_to_office"):
+                    return f"Reversal of payment to {original.payment.payee_name}"
+                return f"Reversal of transaction #{original.pk}"
+        except Exception:
+            return txn.description
+
+        return txn.description
+
+    def reason_for(txn):
+        try:
+            if txn.transaction_type == "receipt":
+                return txn.receipt.purpose
+            if txn.transaction_type in ("payment", "transfer_to_office"):
+                return txn.payment.purpose
+            if txn.transaction_type == "journal_out" and hasattr(txn, "journal_as_out"):
+                return txn.journal_as_out.description
+            if txn.transaction_type == "journal_in" and hasattr(txn, "journal_as_in"):
+                return txn.journal_as_in.description
+        except Exception:
+            pass
+        return txn.description
+
     rows = []
-    running = Decimal('0.00')
+    running = Decimal("0.00")
+
     for txn in transactions:
-        if txn.transaction_type in ('receipt', 'journal_in'):
-            debit, credit = '', str(txn.amount)
-            running += txn.amount
-        else:
-            debit, credit = str(txn.amount), ''
-            running -= txn.amount
+        delta = _transaction_delta(txn)
+        running += delta
+
+        debit = ""
+        credit = ""
+        if delta < 0:
+            debit = f"${abs(delta)}"
+        elif delta > 0:
+            credit = f"${delta}"
+
         rows.append([
             str(txn.date_received_or_paid),
-            txn.get_transaction_type_display(),
-            txn.description,
+            reference_for(txn),
+            transaction_type_label(txn),
+            counterparty_for(txn),
+            reason_for(txn),
             debit,
             credit,
-            str(running),
+            f"${running}",
         ])
 
-    _build_pdf_document(buffer, trust_account, 'Matter Ledger Statement',
-                        f"As at {datetime.date.today()}", rows, col_headers)
-    response = _make_pdf_response(f'ledger_statement_{matter_ledger.pk}.pdf')
+    if not rows:
+        rows.append(["", "", "", "No transactions", "", "", "", "$0.00"])
+
+    table_data = [[
+        Paragraph("Date Rec/Rec'd/Paid", header_style),
+        Paragraph("Reference Number", header_style),
+        Paragraph("Type", header_style),
+        Paragraph("Rec'd From / Paid To / Jnl To-From", header_style),
+        Paragraph("Reason", header_style),
+        Paragraph("Debit Amount", header_style),
+        Paragraph("Credit Amount", header_style),
+        Paragraph("Balance", header_style),
+    ]]
+    table_data += [[Paragraph(str(cell or ""), normal) for cell in row] for row in rows]
+
+    table = Table(
+        table_data,
+        colWidths=[
+            2.0 * cm,
+            2.5 * cm,
+            2.4 * cm,
+            6.0 * cm,
+            5.7 * cm,
+            2.2 * cm,
+            2.2 * cm,
+            2.2 * cm,
+        ],
+        repeatRows=1,
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (5, 1), (7, -1), "RIGHT"),
+        ("PADDING", (0, 0), (-1, -1), 3),
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 0.35 * cm))
+    elements.append(Paragraph(
+        "Debit/credit presentation follows Rule 47 posting: receipts and payment reversals credit the ledger; payments, receipt reversals and journal-outs debit the ledger.",
+        styles["Italic"],
+    ))
+    elements.append(Spacer(1, 0.2 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+
+    doc.build(elements)
+
+    response = _make_pdf_response(f"ledger_statement_{matter_ledger.pk}.pdf")
     response.write(buffer.getvalue())
     return response
 
@@ -280,35 +941,182 @@ def trial_balance_pdf_bytes(trust_account, as_at):
         period_end=as_at,
         is_finalised=True,
     ).order_by('-finalised_on').first()
+
     ledgers = (
         MatterLedger.objects
         .filter(trust_account=trust_account)
-        .select_related('matter')
-        .order_by('matter__file_number')
+        .select_related('matter', 'matter__client')
+        .order_by('matter__file_number', 'pk')
     )
     balances = calculate_ledger_balances_as_at(trust_account, as_at)
 
-    buffer = io.BytesIO()
-    col_headers = ['Ledger name', 'Identifying reference', 'Matter description', 'Balance ($)']
-    rows = []
-    total = Decimal('0.00')
-    for ledger in ledgers:
-        balance = balances.get(ledger.pk, Decimal('0.00'))
-        matter = ledger.matter
-        rows.append([str(matter), matter.file_number or str(ledger.pk), matter.description, str(balance)])
-        total += balance
-    rows.append(['TOTAL', '', '', str(total)])
-    rows.append(['Date generated / prepared', '', '', str(timezone.localdate())])
     if reconciliation:
-        rows.extend([
-            ['Date statement prepared', '', '', str(reconciliation.date_statement_prepared or '')],
-            ['Reconciliation due date', '', '', str(reconciliation.reconciliation_due_date)],
-            ['Prepared within required period', '', '', 'Yes' if reconciliation.prepared_within_required_period else 'No'],
-            ['Preparation status', '', '', reconciliation.preparation_status_label],
+        reconciled_cash_book_balance = reconciliation.reconciled_balance
+        cash_book_balance = reconciliation.cash_book_balance
+        prepared_by = str(reconciliation.finalised_by) if getattr(reconciliation, "finalised_by_id", None) else ""
+        date_prepared = reconciliation.date_statement_prepared
+        due_date = reconciliation.reconciliation_due_date
+        preparation_status = reconciliation.preparation_status_label
+    else:
+        # On-demand/as-at report not linked to a finalised month-end reconciliation.
+        reconciled_cash_book_balance = None
+        cash_book_balance = None
+        prepared_by = ""
+        date_prepared = timezone.localdate()
+        due_date = ""
+        preparation_status = "On-demand / not finalised month-end record"
+
+    buffer = io.BytesIO()
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
+    styles = getSampleStyleSheet()
+
+    normal = styles["Normal"].clone("trial_balance_normal")
+    normal.fontSize = 8
+    normal.leading = 10
+    normal.textColor = colors.black
+
+    label_style = styles["Normal"].clone("trial_balance_label")
+    label_style.fontName = "Helvetica-Bold"
+    label_style.fontSize = 8
+    label_style.leading = 10
+    label_style.textColor = colors.black
+
+    header_style = styles["Normal"].clone("trial_balance_header")
+    header_style.fontName = "Helvetica-Bold"
+    header_style.fontSize = 8
+    header_style.leading = 10
+    header_style.textColor = colors.whitesmoke
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+    )
+
+    elements = [Paragraph("Trust Trial Balance Statement", styles["Heading1"])]
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, normal))
+    elements.append(Paragraph(f"Trust Trial Balance Statement as at: {as_at}", normal))
+    elements.append(Spacer(1, 0.4 * cm))
+
+    ledger_rows = []
+    total = Decimal("0.00")
+    for ledger in ledgers:
+        balance = balances.get(ledger.pk, Decimal("0.00"))
+        matter = ledger.matter
+        # Nil balances may be excluded under the Handbook, but including them assists review.
+        ledger_rows.append([
+            str(matter.client.name if getattr(matter, "client_id", None) else matter),
+            matter.file_number or str(ledger.pk),
+            matter.description or "",
+            f"${balance}",
+        ])
+        total += balance
+
+    if not ledger_rows:
+        ledger_rows.append(["No trust ledger accounts", "", "", "$0.00"])
+
+    ledger_table_data = [
+        [
+            Paragraph("Account Name", header_style),
+            Paragraph("Matter Reference", header_style),
+            Paragraph("Matter Description", header_style),
+            Paragraph("Balance", header_style),
+        ]
+    ]
+    ledger_table_data += [
+        [Paragraph(str(cell or ""), normal) for cell in row]
+        for row in ledger_rows
+    ]
+
+    ledger_table = Table(
+        ledger_table_data,
+        colWidths=[4.8 * cm, 3.2 * cm, 5.8 * cm, 2.8 * cm],
+        repeatRows=1,
+    )
+    ledger_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (3, 1), (3, -1), "RIGHT"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(ledger_table)
+    elements.append(Spacer(1, 0.45 * cm))
+
+    comparison_rows = [
+        ["Total Trust Ledger Accounts", f"${total}"],
+    ]
+
+    if reconciled_cash_book_balance is not None:
+        variance = total - reconciled_cash_book_balance
+        comparison_rows.extend([
+            ["Reconciled Trust Cash Book Balance", f"${reconciled_cash_book_balance}"],
+            ["Variance (should be nil)", f"${variance}"],
+            ["Cash Book Balance", f"${cash_book_balance}"],
+            ["Balanced?", "Yes" if variance == Decimal("0.00") else "NO - VARIANCE"],
+        ])
+    else:
+        comparison_rows.extend([
+            ["Reconciled Trust Cash Book Balance", "No finalised reconciliation for this as-at date"],
+            ["Variance (should be nil)", "Not available"],
+            ["Balanced?", "Not available"],
         ])
 
-    _build_pdf_document(buffer, trust_account, 'Trust Trial Balance Statement / Ledger Reconciliation – Rule 48(2)(b)',
-                        f"As at {as_at}", rows, col_headers)
+    comparison_table = Table(
+        [[Paragraph("Rule 48(2)(b)(i) Comparison", label_style), Paragraph("Amount / Status", label_style)]]
+        + [[Paragraph(str(a), normal), Paragraph(str(b), normal)] for a, b in comparison_rows],
+        colWidths=[10.8 * cm, 5.8 * cm],
+    )
+    comparison_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (1, 1), (1, -1), "RIGHT"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(comparison_table)
+    elements.append(Spacer(1, 0.45 * cm))
+
+    prep_rows = [
+        ["Month / as-at date", str(as_at)],
+        ["Date prepared", str(date_prepared or "")],
+        ["Prepared by", prepared_by],
+        ["Reconciliation due date", str(due_date or "")],
+        ["Preparation status", preparation_status],
+        ["Linked finalised reconciliation", "Yes" if reconciliation else "No"],
+    ]
+
+    prep_table = Table(
+        [[Paragraph("Preparation item", label_style), Paragraph("Value", label_style)]]
+        + [[Paragraph(str(a), normal), Paragraph(str(b or ""), normal)] for a, b in prep_rows],
+        colWidths=[7.0 * cm, 9.6 * cm],
+    )
+    prep_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(prep_table)
+
+    elements.append(Spacer(1, 0.35 * cm))
+    elements.append(Paragraph(
+        "Nil-balance ledger accounts may be excluded under the Handbook; Matter Funds includes them for review transparency.",
+        styles["Italic"],
+    ))
+    elements.append(Spacer(1, 0.2 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+
+    doc.build(elements)
     return buffer.getvalue()
 
 
@@ -322,26 +1130,99 @@ def monthly_reconciliation_pdf(reconciliation):
 def reconciliation_statement_pdf_bytes(reconciliation):
     trust_account = reconciliation.trust_account
     buffer = io.BytesIO()
-    col_headers = ['Item', 'Amount ($)']
+
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
+    styles = getSampleStyleSheet()
+    normal = styles["Normal"]
+    normal.fontSize = 8
+    label_style = styles["Normal"]
+    label_style.fontName = "Helvetica-Bold"
+    label_style.fontSize = 8
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+    )
+
+    elements = [Paragraph("Trust Authorised ADI Reconciliation Statement", styles["Heading1"])]
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, normal))
+
+    elements.append(Paragraph(f"Reconciliation statement as at: {reconciliation.period_end}", normal))
+    elements.append(Spacer(1, 0.4 * cm))
+
     rows = [
-        ['Cash Book Balance', str(reconciliation.cash_book_balance)],
-        ['Ledger Total Balance', str(reconciliation.ledger_total_balance)],
-        ['Bank Statement Balance', str(reconciliation.bank_statement_balance)],
-        ['Less: Unpresented Cheques', str(reconciliation.unpresented_cheques_total)],
-        ['Add: Outstanding Deposits', str(reconciliation.outstanding_deposits_total)],
-        ['Reconciled Balance', str(reconciliation.reconciled_balance)],
-        ['Reconciled?', 'Yes' if reconciliation.is_reconciled else 'NO - DISCREPANCY'],
-        ['Finalised?', 'Yes' if getattr(reconciliation, 'is_finalised', False) else 'No'],
-        ['Finalised By', str(reconciliation.finalised_by) if getattr(reconciliation, 'finalised_by_id', None) else ''],
-        ['Finalised On', str(reconciliation.finalised_on) if getattr(reconciliation, 'finalised_on', None) else ''],
-        ['Date statement prepared', str(reconciliation.date_statement_prepared or '')],
-        ['Reconciliation due date', str(reconciliation.reconciliation_due_date)],
-        ['Prepared within required period', 'Yes' if reconciliation.prepared_within_required_period else 'No' if reconciliation.finalised_on else ''],
-        ['Preparation status', reconciliation.preparation_status_label],
-        ['Period Status', reconciliation.accounting_period.get_status_display() if getattr(reconciliation, 'accounting_period_id', None) else ''],
+        ["Authorised ADI statement balance", "Month-end bank statement balance", f"${reconciliation.bank_statement_balance}"],
+        ["Add", "Receipts in receipts cash book not in authorised ADI statement / outstanding deposits", f"${reconciliation.outstanding_deposits_total}"],
+        ["Add", "Debits in authorised ADI statement not in payments cash book", "$0.00"],
+        ["Less", "Cheques in payments cash book not in authorised ADI statement / unpresented cheques", f"${reconciliation.unpresented_cheques_total}"],
+        ["Less", "Other payments in payments cash book not in authorised ADI statement", "$0.00"],
+        ["Less", "Credits in authorised ADI statement not in receipts cash book", "$0.00"],
+        ["Reconciled cash book balance", "Calculated from authorised ADI balance and reconciling items", f"${reconciliation.reconciled_balance}"],
+        ["Trust cash book balance", "Closing trust cash book balance", f"${reconciliation.cash_book_balance}"],
+        ["Trust ledger total", "Trust ledger control / trial balance total", f"${reconciliation.ledger_total_balance}"],
+        ["Balanced?", "Cash book, ledger total and reconciled cash book balance agree", "Yes" if reconciliation.is_reconciled else "NO - DISCREPANCY"],
     ]
-    _build_pdf_document(buffer, trust_account, 'Monthly Trust Reconciliation',
-                        str(reconciliation.period_end), rows, col_headers)
+
+    table_data = [
+        [Paragraph("Item", label_style), Paragraph("Description", label_style), Paragraph("Amount", label_style)]
+    ]
+    table_data += [[Paragraph(str(cell or ""), normal) for cell in row] for row in rows]
+
+    t = Table(table_data, colWidths=[4.4 * cm, 8.8 * cm, 3.4 * cm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (2, 1), (2, -1), "RIGHT"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(t)
+
+    elements.append(Spacer(1, 0.5 * cm))
+
+    metadata_rows = [
+        ["Date of preparation", str(reconciliation.date_statement_prepared or "")],
+        ["Prepared by", str(reconciliation.finalised_by) if getattr(reconciliation, "finalised_by_id", None) else ""],
+        ["Reconciliation due date", str(reconciliation.reconciliation_due_date)],
+        ["Prepared within required period", "Yes" if reconciliation.prepared_within_required_period else "No" if reconciliation.finalised_on else ""],
+        ["Preparation status", reconciliation.preparation_status_label],
+        ["Finalised?", "Yes" if getattr(reconciliation, "is_finalised", False) else "No"],
+        ["Finalised on", str(reconciliation.finalised_on) if getattr(reconciliation, "finalised_on", None) else ""],
+        ["Accounting period status", reconciliation.accounting_period.get_status_display() if getattr(reconciliation, "accounting_period_id", None) else ""],
+    ]
+
+    metadata_table = Table(
+        [[Paragraph("Review / preparation item", label_style), Paragraph("Value", label_style)]]
+        + [[Paragraph(str(a), normal), Paragraph(str(b or ""), normal)] for a, b in metadata_rows],
+        colWidths=[7.0 * cm, 9.6 * cm],
+    )
+    metadata_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+    elements.append(metadata_table)
+
+    elements.append(Spacer(1, 0.4 * cm))
+    elements.append(Paragraph(
+        "Review notes: outstanding deposits should be followed up for banking; unpresented cheques should be reviewed; "
+        "authorised ADI errors, interest, charges, unidentified deposits, and other ADI-only items should be investigated and corrected in the appropriate next-period records.",
+        styles["Italic"],
+    ))
+    elements.append(Spacer(1, 0.2 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+
+    doc.build(elements)
     return buffer.getvalue()
 
 
@@ -430,47 +1311,97 @@ def external_examiner_pack_zip(trust_account, year):
 
 
 def receipt_pdf(receipt):
-    """Generate a PDF for a single trust receipt."""
+    """Generate a Rule 36-friendly PDF for a single general trust receipt."""
     if not HAS_REPORTLAB:
         raise ImportError("reportlab is required for PDF generation")
-    trust_account = receipt.transaction.matter_ledger.trust_account
+
+    txn = receipt.transaction
+    ledger = txn.matter_ledger
+    matter = ledger.matter
+    trust_account = ledger.trust_account
+
     buffer = io.BytesIO()
     styles = getSampleStyleSheet()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.5*cm, rightMargin=1.5*cm, topMargin=2*cm, bottomMargin=2*cm)
+    normal = styles["Normal"]
+    label_style = styles["Normal"]
+    label_style.fontName = "Helvetica-Bold"
+    label_style.fontSize = 8
+    normal.fontSize = 8
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+    )
     elements = []
-    elements.append(Paragraph(f"Trust Receipt #{receipt.receipt_number}", styles['Heading1']))
+
+    elements.append(Paragraph("Trust Account Receipt", styles["Heading1"]))
     for line in _build_header_info(trust_account):
-        elements.append(Paragraph(line, styles['Normal']))
-    elements.append(Spacer(1, 0.5*cm))
+        elements.append(Paragraph(line, normal))
+    elements.append(Spacer(1, 0.4 * cm))
+
+    date_made_out = receipt.date_made_out
+    date_received = txn.date_received_or_paid
+    made_out_by = (
+        getattr(txn.created_by, "get_full_name", lambda: "")()
+        or getattr(txn.created_by, "email", "")
+        or str(txn.created_by)
+    )
+
     details = [
-        ['Receipt Number', str(receipt.receipt_number)],
-        ['Date receipt made out', str(receipt.date_made_out or '')],
-        ['Date received / confirmed in trust account', str(receipt.transaction.date_received_or_paid)],
-        ['Payor', receipt.payor_name],
-        ['Payment Method', receipt.get_payment_method_display()],
-        ['Cheque Number', receipt.cheque_number],
-        ['Purpose', receipt.purpose],
-        ['Amount', f"${receipt.transaction.amount}"],
-        ['Matter', str(receipt.transaction.matter_ledger.matter)],
-        ['Deposit delay — review if not deposited as soon as practicable', 'Yes' if receipt.late_banking else 'No'],
+        ["Law practice name", trust_account.firm.name],
+        ["Expression", "Trust Account"],
+        ["Receipt number", str(receipt.receipt_number)],
+        ["Date receipt made out", str(date_made_out or "")],
+        ["Date money received, if different", "" if date_received == date_made_out else str(date_received)],
+        ["Amount received", f"${txn.amount}"],
+        ["Form in which money was received", receipt.get_payment_method_display()],
+        ["Received from", receipt.payor_name],
+        ["For and on behalf of / client", getattr(matter.client, "name", "")],
+        ["Matter reference", matter.file_number or ""],
+        ["Matter description", matter.description or ""],
+        ["Reason / purpose", receipt.purpose],
+        ["Made out by", made_out_by],
     ]
+
+    if receipt.cheque_number:
+        details.insert(7, ["Cheque number", receipt.cheque_number])
+
     if receipt.uses_separate_deposit_date:
-        details.insert(3, ['Date deposited to trust account', str(receipt.transaction.date_banked or '')])
-    t = Table(details)
+        details.insert(5, ["Date deposited to trust account", str(txn.date_banked or "")])
+
+    details.append([
+        "Record copy",
+        "Generated and retained by Matter Funds. Original receipt available to the person from whom the money was received on request.",
+    ])
+
+    wrapped_details = [
+        [Paragraph(str(label), label_style), Paragraph(str(value or ""), normal)]
+        for label, value in details
+    ]
+
+    t = Table(wrapped_details, colWidths=[6.0 * cm, 10.5 * cm], repeatRows=0)
     t.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-        ('PADDING', (0, 0), (-1, -1), 6),
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("PADDING", (0, 0), (-1, -1), 5),
     ]))
     elements.append(t)
-    elements.append(Spacer(1, 0.5*cm))
-    elements.append(Paragraph(FOOTER_TEXT, styles['Italic']))
+    elements.append(Spacer(1, 0.4 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+
     doc.build(elements)
-    response = _make_pdf_response(f'receipt_{receipt.receipt_number}.pdf')
+
+    response = _make_pdf_response(f"receipt_{receipt.receipt_number}.pdf")
     response.write(buffer.getvalue())
     return response
+
 
 import hashlib
 import json
@@ -666,3 +1597,239 @@ def trust_records_export_pack_zip(trust_account, date_from=None, date_to=None, y
         readme_lines.extend(f'- {name}' for name in sorted(included_files))
         zf.writestr('README.txt', '\n'.join(readme_lines) + '\n')
     return HttpResponse(buf.getvalue(), content_type='application/zip', headers={'Content-Disposition': f'attachment; filename="trust_records_export_pack_{date_from}_{date_to}.zip"'})
+
+
+def payment_pdf(payment):
+    """Generate a Rule 43-friendly PDF for a single general trust payment or costs transfer."""
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
+    txn = payment.transaction
+    ledger = txn.matter_ledger
+    matter = ledger.matter
+    trust_account = ledger.trust_account
+    is_costs_transfer = txn.transaction_type == "transfer_to_office"
+
+    buffer = io.BytesIO()
+    styles = getSampleStyleSheet()
+
+    normal = styles["Normal"].clone("payment_pdf_normal")
+    normal.fontSize = 8
+    normal.leading = 10
+    normal.textColor = colors.black
+
+    label_style = styles["Normal"].clone("payment_pdf_label")
+    label_style.fontName = "Helvetica-Bold"
+    label_style.fontSize = 8
+    label_style.leading = 10
+    label_style.textColor = colors.black
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+    )
+    elements = []
+
+    title = "Transfer Costs to Office Source Record" if is_costs_transfer else "Trust Payment Source Record"
+    elements.append(Paragraph(title, styles["Heading1"]))
+
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, normal))
+    elements.append(Spacer(1, 0.4 * cm))
+
+    authorised_by = (
+        getattr(payment.authorised_by, "get_full_name", lambda: "")()
+        or getattr(payment.authorised_by, "email", "")
+        or str(payment.authorised_by or "")
+    )
+    created_by = (
+        getattr(txn.created_by, "get_full_name", lambda: "")()
+        or getattr(txn.created_by, "email", "")
+        or str(txn.created_by or "")
+    )
+
+    details = [
+        ["Law practice name", trust_account.firm.name],
+        ["Expression", "Law Practice Trust Account"],
+        ["Withdrawal type", txn.get_transaction_type_display()],
+        ["Withdrawal method", payment.get_payment_method_display()],
+        ["Payment / EFT reference", str(payment.payment_number)],
+        ["Date of cheque / EFT", str(txn.date_received_or_paid)],
+        ["Amount ordered to be paid", f"${txn.amount}"],
+        ["Pay to / payee", payment.payee_name],
+        ["On behalf of / client", getattr(matter.client, "name", "")],
+        ["Matter reference", matter.file_number or ""],
+        ["Matter description", matter.description or ""],
+        ["Ledger account debited", str(ledger)],
+        ["Reason / purpose of payment", payment.purpose],
+        ["Authorised by", authorised_by],
+        ["Created by", created_by],
+    ]
+
+    if payment.cheque_number:
+        details.insert(5, ["Cheque number", payment.cheque_number])
+
+    if payment.payee_bsb or payment.payee_account:
+        details.insert(9, ["Payee BSB / Account number", f"{payment.payee_bsb or ''} / {payment.payee_account or ''}"])
+
+    if is_costs_transfer:
+        details.extend([
+            ["", ""],
+            ["Costs transfer evidence", ""],
+            ["Costs withdrawal method", payment.get_costs_withdrawal_method_display()],
+            ["Key evidence date", str(payment.key_evidence_date or "")],
+            ["Costs evidence file", payment.costs_evidence_file.name if payment.costs_evidence_file else ""],
+            ["Notice/request file", payment.notice_or_request_file.name if payment.notice_or_request_file else ""],
+            ["Authority/agreement file", payment.authority_or_agreement_file.name if payment.authority_or_agreement_file else ""],
+            ["Reimbursement evidence file", payment.reimbursement_evidence_file.name if payment.reimbursement_evidence_file else ""],
+            ["Costs withdrawal notes", payment.costs_withdrawal_notes or ""],
+            ["Evidence note", "This source record should be read with the retained evidence file(s)."],
+        ])
+
+    if payment.payment_method == "cheque":
+        details.append([
+            "Cheque control note",
+            "Trust cheques must be payable to or to the order of a specific person, not to bearer or cash, crossed not negotiable, and signed by an authorised person.",
+        ])
+
+    details.append([
+        "Record copy",
+        "Generated and retained by Matter Funds as the trust cheque requisition / EFT authorisation source record.",
+    ])
+
+    wrapped_details = [
+        [Paragraph(str(label), label_style), Paragraph(str(value or ""), normal)]
+        for label, value in details
+    ]
+
+    t = Table(wrapped_details, colWidths=[6.0 * cm, 10.5 * cm], repeatRows=0)
+    t.setStyle(TableStyle([
+        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+
+    elements.append(t)
+    elements.append(Spacer(1, 0.4 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+
+    doc.build(elements)
+
+    response = _make_pdf_response(f"payment_{payment.payment_number}.pdf")
+    response.write(buffer.getvalue())
+    return response
+
+
+def reversal_pdf(reversal):
+    """Generate a source-record PDF for a trust transaction reversal."""
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
+    original = reversal.reverses
+    trust_account = reversal.matter_ledger.trust_account
+    matter = reversal.matter_ledger.matter
+
+    buffer = io.BytesIO()
+    styles = getSampleStyleSheet()
+
+    normal = styles["Normal"].clone("reversal_normal")
+    normal.fontSize = 8
+    normal.leading = 10
+    normal.textColor = colors.black
+
+    label_style = styles["Normal"].clone("reversal_label")
+    label_style.fontName = "Helvetica-Bold"
+    label_style.fontSize = 8
+    label_style.leading = 10
+    label_style.textColor = colors.black
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=1.5 * cm,
+        rightMargin=1.5 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+    )
+
+    elements = [Paragraph("Trust Transaction Reversal Source Record", styles["Heading1"])]
+    for line in _build_header_info(trust_account):
+        elements.append(Paragraph(line, normal))
+    elements.append(Spacer(1, 0.4 * cm))
+
+    def source_reference(txn):
+        try:
+            if txn.transaction_type == "receipt":
+                return f"Receipt #{txn.receipt.receipt_number}"
+            if txn.transaction_type in ("payment", "transfer_to_office"):
+                return f"Payment #{txn.payment.payment_number}"
+            if txn.transaction_type == "journal_out" and hasattr(txn, "journal_as_out"):
+                return f"Journal J{txn.journal_as_out.pk}"
+            if txn.transaction_type == "journal_in" and hasattr(txn, "journal_as_in"):
+                return f"Journal J{txn.journal_as_in.pk}"
+        except Exception:
+            pass
+        return f"Transaction #{txn.pk}"
+
+    def ledger_effect_text(txn):
+        if not original:
+            return ""
+        if original.transaction_type in ("receipt", "journal_in"):
+            return "Debit to ledger / reduction of trust ledger balance"
+        if original.transaction_type in ("payment", "transfer_to_office", "journal_out"):
+            return "Credit to ledger / restoration of trust ledger balance"
+        return ""
+
+    created_by = (
+        getattr(reversal.created_by, "get_full_name", lambda: "")()
+        or getattr(reversal.created_by, "email", "")
+        or str(reversal.created_by or "")
+    )
+
+    rows = [
+        ["Reversal transaction", f"Transaction #{reversal.pk}"],
+        ["Reversal date", str(reversal.date_received_or_paid)],
+        ["Amount reversed", f"${reversal.amount}"],
+        ["Reversal reason", reversal.description],
+        ["Created by", created_by],
+        ["Matter / ledger", f"{matter.file_number or reversal.matter_ledger_id} - {matter.description}"],
+        ["Client", getattr(matter.client, "name", "")],
+        ["Original transaction", source_reference(original) if original else ""],
+        ["Original transaction date", str(original.date_received_or_paid) if original else ""],
+        ["Original transaction type", original.get_transaction_type_display() if original else ""],
+        ["Original description", original.description if original else ""],
+        ["Ledger effect", ledger_effect_text(reversal)],
+        ["Record treatment", "Original source record remains retained. This reversal is recorded separately and is not a deletion or cancellation of the original record."],
+    ]
+
+    table = Table(
+        [[Paragraph(a, label_style), Paragraph(str(b or ""), normal)] for a, b in rows],
+        colWidths=[6.0 * cm, 10.5 * cm],
+    )
+    table.setStyle(TableStyle([
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("PADDING", (0, 0), (-1, -1), 5),
+    ]))
+
+    elements.append(table)
+    elements.append(Spacer(1, 0.4 * cm))
+    elements.append(Paragraph(
+        "Generated and retained by Matter Funds as the trust transaction reversal source record.",
+        styles["Italic"],
+    ))
+    elements.append(Spacer(1, 0.2 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+
+    doc.build(elements)
+
+    response = _make_pdf_response(f"reversal_{reversal.pk}.pdf")
+    response.write(buffer.getvalue())
+    return response
