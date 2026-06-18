@@ -197,7 +197,7 @@ class TransferCostsToOfficeForm(forms.Form):
 class ReconciliationBankLineForm(forms.ModelForm):
     class Meta:
         model = ReconciliationBankLine
-        fields = ['line_date', 'line_type', 'amount', 'description', 'reference', 'notes']
+        fields = ['line_date', 'line_type', 'amount', 'description', 'reference', 'adjustment_category', 'carry_forward_until_cleared', 'notes']
         widgets = {
             'line_date': forms.DateInput(attrs={'type': 'date'}),
             'notes': forms.Textarea(attrs={'rows': 2}),
@@ -208,6 +208,8 @@ class ReconciliationBankLineForm(forms.ModelForm):
             'amount': 'Statement amount',
             'description': 'Statement description',
             'reference': 'Bank reference',
+            'adjustment_category': 'Adjustment category',
+            'carry_forward_until_cleared': 'Carry forward until cleared',
             'notes': 'Investigation / correction notes',
         }
 

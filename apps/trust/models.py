@@ -594,6 +594,9 @@ class MonthlyReconciliation(models.Model):
     bank_statement_balance = models.DecimalField(max_digits=12, decimal_places=2)
     unpresented_cheques_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     outstanding_deposits_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    other_payments_not_in_adi_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    credits_not_in_cash_book_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
+    debits_not_in_cash_book_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     reconciled_balance = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'))
     is_reconciled = models.BooleanField(default=False)
     is_finalised = models.BooleanField(default=False)
@@ -652,7 +655,10 @@ class MonthlyReconciliation(models.Model):
         self.reconciled_balance = (
             self.bank_statement_balance
             - self.unpresented_cheques_total
+            - self.other_payments_not_in_adi_total
             + self.outstanding_deposits_total
+            - self.credits_not_in_cash_book_total
+            + self.debits_not_in_cash_book_total
         )
         self.is_reconciled = (
             self.cash_book_balance == self.ledger_total_balance == self.reconciled_balance
@@ -712,6 +718,31 @@ class ReconciliationBankLine(models.Model):
         (LINE_TYPE_DEBIT, 'Debit in authorised ADI statement'),
     ]
 
+    ADJUSTMENT_CATEGORY_MATCHED = 'matched_to_cash_book'
+    ADJUSTMENT_CATEGORY_RECEIPT_NEXT_MONTH = 'receipt_to_issue_next_month'
+    ADJUSTMENT_CATEGORY_UNIDENTIFIED_DEPOSIT = 'unidentified_deposit'
+    ADJUSTMENT_CATEGORY_ADI_ERROR = 'adi_error_bank_to_reverse'
+    ADJUSTMENT_CATEGORY_INTEREST_ERROR = 'interest_credited_in_error'
+    ADJUSTMENT_CATEGORY_BANK_CHARGE_ERROR = 'bank_charge_debited_in_error'
+    ADJUSTMENT_CATEGORY_BANK_DEBIT_NOT_CASH_BOOK = 'bank_debit_not_in_cash_book'
+    ADJUSTMENT_CATEGORY_UNPRESENTED_CHEQUE = 'unpresented_cheque'
+    ADJUSTMENT_CATEGORY_OTHER_PAYMENT_NOT_ADI = 'other_payment_not_in_adi'
+    ADJUSTMENT_CATEGORY_OTHER = 'other_adjustment'
+
+    ADJUSTMENT_CATEGORY_CHOICES = [
+        ('', 'Unclassified / requires review'),
+        (ADJUSTMENT_CATEGORY_MATCHED, 'Matched to cash book'),
+        (ADJUSTMENT_CATEGORY_RECEIPT_NEXT_MONTH, 'Direct deposit / receipt to be issued next month'),
+        (ADJUSTMENT_CATEGORY_UNIDENTIFIED_DEPOSIT, 'Unidentified deposit'),
+        (ADJUSTMENT_CATEGORY_ADI_ERROR, 'Authorised ADI error - bank to reverse'),
+        (ADJUSTMENT_CATEGORY_INTEREST_ERROR, 'Interest credited in error - bank to reverse'),
+        (ADJUSTMENT_CATEGORY_BANK_CHARGE_ERROR, 'Bank charge debited in error - bank to reverse'),
+        (ADJUSTMENT_CATEGORY_BANK_DEBIT_NOT_CASH_BOOK, 'Bank debit not in cash book - investigate/correct'),
+        (ADJUSTMENT_CATEGORY_UNPRESENTED_CHEQUE, 'Unpresented cheque'),
+        (ADJUSTMENT_CATEGORY_OTHER_PAYMENT_NOT_ADI, 'Other payment in cash book not in authorised ADI statement'),
+        (ADJUSTMENT_CATEGORY_OTHER, 'Other reconciliation adjustment'),
+    ]
+
     reconciliation = models.ForeignKey(
         MonthlyReconciliation,
         on_delete=models.CASCADE,
@@ -722,6 +753,36 @@ class ReconciliationBankLine(models.Model):
     amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
     description = models.CharField(max_length=500)
     reference = models.CharField(max_length=100, blank=True)
+    adjustment_category = models.CharField(
+        max_length=60,
+        choices=ADJUSTMENT_CATEGORY_CHOICES,
+        blank=True,
+        default='',
+    )
+    carry_forward_until_cleared = models.BooleanField(default=False)
+    cleared_by_transaction = models.ForeignKey(
+        TrustTransaction,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='clears_reconciliation_adjustments',
+    )
+    cleared_in_reconciliation = models.ForeignKey(
+        MonthlyReconciliation,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='cleared_bank_line_adjustments',
+    )
+    cleared_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='reconciliation_bank_lines_cleared',
+    )
+    cleared_at = models.DateTimeField(null=True, blank=True)
+    cleared_notes = models.TextField(blank=True, default='')
     matched_transaction = models.ForeignKey(
         TrustTransaction,
         on_delete=models.PROTECT,
@@ -756,6 +817,15 @@ class ReconciliationBankLine(models.Model):
         if self.reconciliation_id and self.matched_transaction_id:
             if self.matched_transaction.matter_ledger.trust_account_id != self.reconciliation.trust_account_id:
                 errors['matched_transaction'] = 'Matched transaction must belong to the same trust account.'
+        if self.reconciliation_id and self.cleared_by_transaction_id:
+            if self.cleared_by_transaction.matter_ledger.trust_account_id != self.reconciliation.trust_account_id:
+                errors['cleared_by_transaction'] = 'Clearing transaction must belong to the same trust account.'
+            if self.cleared_by_transaction.date_received_or_paid <= self.reconciliation.period_end:
+                errors['cleared_by_transaction'] = 'A carried-forward adjustment should be cleared by a later-period transaction.'
+        if self.matched_transaction_id and self.carry_forward_until_cleared:
+            errors['carry_forward_until_cleared'] = 'Matched bank lines should not be carried forward.'
+        if self.cleared_by_transaction_id and not self.carry_forward_until_cleared:
+            errors['carry_forward_until_cleared'] = 'Only carried-forward adjustments can be cleared by a later transaction.'
         if self.reconciliation_id and self.reconciliation.is_finalised:
             errors['reconciliation'] = 'Finalised reconciliations cannot be changed.'
         if errors:

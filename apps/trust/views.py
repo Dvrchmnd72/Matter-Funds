@@ -1,4 +1,5 @@
 import datetime
+from decimal import Decimal
 from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db.models import Q, Count
@@ -435,6 +436,7 @@ class ReconciliationDetailView(StaffRequiredMixin, DetailView):
         return ctx
 
 
+
 def _cash_book_direction(txn):
     if txn.transaction_type == 'receipt':
         return 'credit'
@@ -458,6 +460,13 @@ def _cash_book_match_label(txn):
         txn.description,
     ]
     return " | ".join(str(bit) for bit in bits if bit)
+
+
+def _money_sum(items):
+    total = Decimal('0.00')
+    for item in items:
+        total += item.amount
+    return total
 
 
 class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
@@ -493,16 +502,20 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
             .order_by('date_received_or_paid', 'pk')
         )
 
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        reconciliation = self.get_reconciliation()
-        internal_transactions = list(self._internal_transactions(reconciliation))
-        bank_lines = list(
-            reconciliation.bank_lines
-            .select_related('matched_transaction', 'matched_transaction__matter_ledger__matter')
-            .order_by('line_date', 'pk')
+    def _prior_uncleared_adjustments(self, reconciliation):
+        return (
+            ReconciliationBankLine.objects
+            .filter(
+                reconciliation__trust_account=reconciliation.trust_account,
+                reconciliation__period_end__lt=reconciliation.period_end,
+                carry_forward_until_cleared=True,
+                cleared_by_transaction__isnull=True,
+            )
+            .select_related('reconciliation', 'matched_transaction')
+            .order_by('reconciliation__period_end', 'line_date', 'pk')
         )
 
+    def _worksheet_buckets(self, reconciliation, internal_transactions, bank_lines):
         matched_ids = {
             line.matched_transaction_id
             for line in bank_lines
@@ -526,12 +539,54 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
 
         unmatched_bank_credits = [
             line for line in bank_lines
-            if line.line_type == ReconciliationBankLine.LINE_TYPE_CREDIT and not line.matched_transaction_id
+            if line.line_type == ReconciliationBankLine.LINE_TYPE_CREDIT
+            and not line.matched_transaction_id
+            and not line.cleared_by_transaction_id
         ]
         unmatched_bank_debits = [
             line for line in bank_lines
-            if line.line_type == ReconciliationBankLine.LINE_TYPE_DEBIT and not line.matched_transaction_id
+            if line.line_type == ReconciliationBankLine.LINE_TYPE_DEBIT
+            and not line.matched_transaction_id
+            and not line.cleared_by_transaction_id
         ]
+
+        return {
+            'matched_ids': matched_ids,
+            'outstanding_deposits': outstanding_deposits,
+            'unpresented_cheques': unpresented_cheques,
+            'other_payments_not_in_adi': other_payments_not_in_adi,
+            'unmatched_bank_credits': unmatched_bank_credits,
+            'unmatched_bank_debits': unmatched_bank_debits,
+        }
+
+    def _update_totals_from_worksheet(self, reconciliation):
+        internal_transactions = list(self._internal_transactions(reconciliation))
+        bank_lines = list(reconciliation.bank_lines.all())
+        buckets = self._worksheet_buckets(reconciliation, internal_transactions, bank_lines)
+
+        reconciliation.outstanding_deposits_total = _money_sum(buckets['outstanding_deposits'])
+        reconciliation.unpresented_cheques_total = _money_sum(buckets['unpresented_cheques'])
+        reconciliation.other_payments_not_in_adi_total = _money_sum(buckets['other_payments_not_in_adi'])
+        reconciliation.credits_not_in_cash_book_total = _money_sum(buckets['unmatched_bank_credits'])
+        reconciliation.debits_not_in_cash_book_total = _money_sum(buckets['unmatched_bank_debits'])
+        reconciliation.save()
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        reconciliation = self.get_reconciliation()
+        internal_transactions = list(self._internal_transactions(reconciliation))
+        bank_lines = list(
+            reconciliation.bank_lines
+            .select_related(
+                'matched_transaction',
+                'matched_transaction__matter_ledger__matter',
+                'cleared_by_transaction',
+                'cleared_by_transaction__matter_ledger__matter',
+                'cleared_in_reconciliation',
+            )
+            .order_by('line_date', 'pk')
+        )
+        buckets = self._worksheet_buckets(reconciliation, internal_transactions, bank_lines)
 
         ctx.update({
             'reconciliation': reconciliation,
@@ -539,17 +594,19 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
             'line_form': ReconciliationBankLineForm(),
             'bank_lines': bank_lines,
             'candidate_transactions': [
-                {'id': txn.pk, 'label': _cash_book_match_label(txn)}
+                {'id': txn.pk, 'label': _cash_book_match_label(txn), 'direction': _cash_book_direction(txn)}
                 for txn in internal_transactions
             ],
-            'outstanding_deposits': outstanding_deposits,
-            'unpresented_cheques': unpresented_cheques,
-            'other_payments_not_in_adi': other_payments_not_in_adi,
-            'unmatched_bank_credits': unmatched_bank_credits,
-            'unmatched_bank_debits': unmatched_bank_debits,
-            'matched_count': len(matched_ids),
+            'prior_uncleared_adjustments': list(self._prior_uncleared_adjustments(reconciliation)),
+            'outstanding_deposits': buckets['outstanding_deposits'],
+            'unpresented_cheques': buckets['unpresented_cheques'],
+            'other_payments_not_in_adi': buckets['other_payments_not_in_adi'],
+            'unmatched_bank_credits': buckets['unmatched_bank_credits'],
+            'unmatched_bank_debits': buckets['unmatched_bank_debits'],
+            'matched_count': len(buckets['matched_ids']),
             'bank_line_count': len(bank_lines),
             'can_edit_worksheet': not reconciliation.is_finalised,
+            'adjustment_category_choices': ReconciliationBankLine.ADJUSTMENT_CATEGORY_CHOICES,
         })
         return ctx
 
@@ -576,21 +633,49 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
             line = get_object_or_404(reconciliation.bank_lines.all(), pk=request.POST.get('line_id'))
             txn_id = request.POST.get('matched_transaction') or None
             line.notes = request.POST.get('notes', '')
+            line.adjustment_category = request.POST.get('adjustment_category', '')
+            line.carry_forward_until_cleared = bool(request.POST.get('carry_forward_until_cleared'))
+
             if txn_id:
-                txn = get_object_or_404(
-                    self._internal_transactions(reconciliation),
-                    pk=txn_id,
-                )
+                txn = get_object_or_404(self._internal_transactions(reconciliation), pk=txn_id)
+                expected_direction = _cash_book_direction(txn)
+                if expected_direction != line.line_type:
+                    messages.error(request, 'Bank line type does not match the selected cash book transaction direction.')
+                    return redirect(reverse('trust:reconciliation_worksheet', kwargs={'pk': reconciliation.pk}))
                 line.matched_transaction = txn
                 line.matched_by = request.user
                 line.matched_at = timezone.now()
+                line.adjustment_category = ReconciliationBankLine.ADJUSTMENT_CATEGORY_MATCHED
+                line.carry_forward_until_cleared = False
                 messages.success(request, 'Bank line matched to cash book transaction.')
             else:
                 line.matched_transaction = None
                 line.matched_by = None
                 line.matched_at = None
-                messages.success(request, 'Bank line marked as unmatched.')
+                messages.success(request, 'Bank line saved as unmatched / adjustment item.')
+
             line.save()
+
+        elif action == 'clear_adjustment':
+            line = get_object_or_404(
+                self._prior_uncleared_adjustments(reconciliation),
+                pk=request.POST.get('line_id'),
+            )
+            txn = get_object_or_404(
+                self._internal_transactions(reconciliation),
+                pk=request.POST.get('cleared_by_transaction'),
+            )
+            line.cleared_by_transaction = txn
+            line.cleared_in_reconciliation = reconciliation
+            line.cleared_by = request.user
+            line.cleared_at = timezone.now()
+            line.cleared_notes = request.POST.get('cleared_notes', '')
+            line.save()
+            messages.success(request, 'Prior reconciliation adjustment cleared by this period transaction.')
+
+        elif action == 'update_totals':
+            self._update_totals_from_worksheet(reconciliation)
+            messages.success(request, 'Reconciliation adjustment totals updated from worksheet.')
 
         elif action == 'delete_line':
             line = get_object_or_404(reconciliation.bank_lines.all(), pk=request.POST.get('line_id'))
