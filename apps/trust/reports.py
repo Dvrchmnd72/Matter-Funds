@@ -1681,13 +1681,13 @@ def payment_pdf(payment):
             ["", ""],
             ["Costs transfer evidence", ""],
             ["Costs withdrawal method", payment.get_costs_withdrawal_method_display()],
-            ["Key evidence date", str(payment.key_evidence_date or "")],
-            ["Costs evidence file", payment.costs_evidence_file.name if payment.costs_evidence_file else ""],
-            ["Notice/request file", payment.notice_or_request_file.name if payment.notice_or_request_file else ""],
-            ["Authority/agreement file", payment.authority_or_agreement_file.name if payment.authority_or_agreement_file else ""],
-            ["Reimbursement evidence file", payment.reimbursement_evidence_file.name if payment.reimbursement_evidence_file else ""],
-            ["Costs withdrawal notes", payment.costs_withdrawal_notes or ""],
-            ["Evidence note", "This source record should be read with the retained evidence file(s)."],
+            ["Key evidence date", str(payment.key_evidence_date or "—")],
+            ["Costs evidence file", payment.costs_evidence_file.name if payment.costs_evidence_file else "—"],
+            ["Notice/request file", payment.notice_or_request_file.name if payment.notice_or_request_file else "—"],
+            ["Authority/agreement file", payment.authority_or_agreement_file.name if payment.authority_or_agreement_file else "—"],
+            ["Reimbursement evidence file", payment.reimbursement_evidence_file.name if payment.reimbursement_evidence_file else "—"],
+            ["Costs withdrawal notes", payment.costs_withdrawal_notes or "—"],
+            ["Evidence note", "Uploaded evidence is optional at entry. Supporting evidence should be retained and produced for examiner review if requested."],
         ])
 
     if payment.payment_method == "cheque":
@@ -1698,7 +1698,7 @@ def payment_pdf(payment):
 
     details.append([
         "Record copy",
-        "Generated and retained by Matter Funds as the trust cheque requisition / EFT authorisation source record.",
+        "Generated and retained by Matter Funds as the trust payment / costs-transfer source record.",
     ])
 
     wrapped_details = [
