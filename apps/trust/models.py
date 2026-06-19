@@ -665,20 +665,11 @@ class MonthlyReconciliation(models.Model):
         )
         self.full_clean()
         super().save(*args, **kwargs)
-        if not self.is_reconciled:
-            discrepancy = self.cash_book_balance - self.reconciled_balance
-            Irregularity.objects.get_or_create(
-                trust_account=self.trust_account,
-                discovered_on=self.period_end,
-                defaults={
-                    'description': (
-                        f'Monthly reconciliation for period ending {self.period_end} failed. '
-                        f'Cash book balance {self.cash_book_balance} does not match '
-                        f'reconciled balance {self.reconciled_balance}.'
-                    ),
-                    'amount': abs(discrepancy),
-                }
-            )
+        # A reconciliation timing difference or adjustment is not, by itself,
+        # a trust-account irregularity. Irregularities should be recorded
+        # deliberately for true trust accounting issues such as deficiencies,
+        # unauthorised withdrawals, incorrect disbursements, debit balances,
+        # or other reportable receipt/recording/disbursement problems.
 
     def clean(self):
         errors = {}
