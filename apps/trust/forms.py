@@ -125,7 +125,7 @@ class PaymentForm(forms.Form):
         label='Cheque number',
         max_length=50,
         required=False,
-        help_text='Optional. Leave blank to use the next Matter Funds payment/EFT reference automatically.'
+        help_text='Required for cheque payments only.'
     )
     purpose = forms.CharField(label='Reason / purpose of payment', max_length=500)
 
