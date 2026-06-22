@@ -5,7 +5,7 @@ from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
 from apps.clients.models import Client
 from apps.matters.models import Matter
-from .models import MatterLedger, MonthlyReconciliation, DepositRecord, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ReconciliationBankLine
+from .models import MatterLedger, MonthlyReconciliation, DepositRecord, Receipt, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ReconciliationBankLine
 
 
 class TrustAccountUpdateForm(forms.ModelForm):
