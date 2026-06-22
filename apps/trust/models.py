@@ -446,6 +446,7 @@ class Receipt(models.Model):
     payment_reference_override = models.CharField(max_length=80, blank=True)
     purpose = models.CharField(max_length=500)
     late_banking = models.BooleanField(default=False)
+    deposit_record = models.ForeignKey('DepositRecord', on_delete=models.PROTECT, null=True, blank=True, related_name='receipts')
 
     class Meta:
         verbose_name = 'Receipt'
@@ -471,6 +472,53 @@ class Receipt(models.Model):
         # Deposit delay is calculated in the receipt service as a review indicator.
         # Do not treat any recording deadline as a banking grace period.
         return super().clean()
+
+
+class DepositRecord(models.Model):
+    DEPOSIT_TYPE_CASH = 'cash'
+    DEPOSIT_TYPE_CHEQUE = 'cheque'
+    DEPOSIT_TYPE_CHOICES = [
+        (DEPOSIT_TYPE_CASH, 'Cash Deposit Record'),
+        (DEPOSIT_TYPE_CHEQUE, 'Cheque Deposit Record'),
+    ]
+
+    trust_account = models.ForeignKey(TrustAccount, on_delete=models.PROTECT, related_name='deposit_records')
+    deposit_number = models.PositiveIntegerField()
+    deposit_type = models.CharField(max_length=10, choices=DEPOSIT_TYPE_CHOICES)
+    deposit_date = models.DateField()
+    prepared_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='deposit_records_prepared')
+    prepared_at = models.DateTimeField(auto_now_add=True)
+    notes = models.TextField(blank=True, default='')
+
+    class Meta:
+        verbose_name = 'Deposit Record'
+        verbose_name_plural = 'Deposit Records'
+        ordering = ['-deposit_date', '-deposit_number']
+        unique_together = [('trust_account', 'deposit_number')]
+        indexes = [
+            models.Index(fields=['trust_account', 'deposit_type']),
+            models.Index(fields=['deposit_date']),
+        ]
+
+    @property
+    def total_amount(self):
+        total = Decimal('0.00')
+        for receipt in self.receipts.select_related('transaction').all():
+            total += receipt.transaction.amount
+        return total
+
+    def clean(self):
+        errors = {}
+        if self.deposit_type not in {'cash', 'cheque'}:
+            errors['deposit_type'] = 'Deposit records can only be created for cash or cheque receipts.'
+        if self.deposit_date and self.deposit_date > timezone.localdate():
+            errors['deposit_date'] = 'Deposit date cannot be future-dated.'
+        if errors:
+            raise ValidationError(errors)
+
+    def __str__(self):
+        return f"{self.get_deposit_type_display()} #{self.deposit_number} - {self.deposit_date}"
+
 
 
 class Payment(models.Model):

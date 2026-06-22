@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Deposit Record – Matter Funds{% endblock %}
+{% block content %}
+<h1>{{ deposit_record.get_deposit_type_display }} #{{ deposit_record.deposit_number }}</h1>
+
+<p class="text-muted">
+  {{ deposit_record.trust_account }}<br>
+  Deposit date: {{ deposit_record.deposit_date }}<br>
+  Prepared by: {{ deposit_record.prepared_by }} on {{ deposit_record.prepared_at }}
+</p>
+
+<p>
+  <a href="{% url 'trust:deposit_record_pdf' deposit_record.pk %}" class="btn btn-primary">Download PDF</a>
+  <a href="{% url 'trust:deposit_record_list' %}" class="btn btn-secondary">Back to Deposit Records</a>
+</p>
+
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>Receipt</th>
+      <th>Receipt date</th>
+      <th>Received from</th>
+      <th>Matter</th>
+      <th class="text-end">Amount</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for receipt in receipts %}
+    <tr>
+      <td>R{{ receipt.receipt_number }}</td>
+      <td>{{ receipt.transaction.date_received_or_paid }}</td>
+      <td>{{ receipt.payor_name }}</td>
+      <td>{{ receipt.transaction.matter_ledger.matter.file_number }} – {{ receipt.transaction.matter_ledger.matter.description }}</td>
+      <td class="text-end">${{ receipt.transaction.amount }}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="5">No receipts attached.</td></tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <th colspan="4" class="text-end">Total deposited</th>
+      <th class="text-end">${{ deposit_record.total_amount }}</th>
+    </tr>
+  </tfoot>
+</table>
+
+{% if deposit_record.notes %}
+<h2>Notes</h2>
+<p>{{ deposit_record.notes }}</p>
+{% endif %}
+{% endblock %}

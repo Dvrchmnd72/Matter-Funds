@@ -1833,3 +1833,40 @@ def reversal_pdf(reversal):
     response = _make_pdf_response(f"reversal_{reversal.pk}.pdf")
     response.write(buffer.getvalue())
     return response
+
+def deposit_record_pdf_bytes(deposit_record):
+    receipts = deposit_record.receipts.select_related(
+        'transaction',
+        'transaction__matter_ledger',
+        'transaction__matter_ledger__matter',
+    ).order_by('receipt_number')
+
+    rows = []
+    for receipt in receipts:
+        txn = receipt.transaction
+        matter = txn.matter_ledger.matter
+        rows.append([
+            f"R{receipt.receipt_number}",
+            str(txn.date_received_or_paid),
+            receipt.payor_name,
+            matter.file_number or str(matter.pk),
+            matter.description,
+            str(txn.amount),
+        ])
+
+    rows.append(['', '', '', '', 'Total deposited', str(deposit_record.total_amount)])
+    rows.append(['', '', '', '', 'Prepared by', str(deposit_record.prepared_by)])
+    rows.append(['', '', '', '', 'Prepared at', str(deposit_record.prepared_at)])
+    if deposit_record.notes:
+        rows.append(['', '', '', '', 'Notes', deposit_record.notes])
+
+    buffer = io.BytesIO()
+    _build_pdf_document(
+        buffer,
+        deposit_record.trust_account,
+        deposit_record.get_deposit_type_display(),
+        f"Deposit Record #{deposit_record.deposit_number} | Deposited {deposit_record.deposit_date}",
+        rows,
+        ['Receipt', 'Receipt date', 'Received from', 'Matter', 'Matter description', 'Amount'],
+    )
+    return buffer.getvalue()

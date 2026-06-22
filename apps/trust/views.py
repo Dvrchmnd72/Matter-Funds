@@ -16,11 +16,11 @@ from apps.trust import services
 from apps.trust import reports as trust_reports
 from .models import (
     TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment, TrustJournal,
-    MonthlyReconciliation, ReconciliationBankLine, Irregularity, TrustAccountingPeriod, TrustMonthlyRecord,
+    MonthlyReconciliation, DepositRecord, ReconciliationBankLine, Irregularity, TrustAccountingPeriod, TrustMonthlyRecord,
     ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement,
 )
 from .forms import (
-    TrustAccountUpdateForm, ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm,
+    TrustAccountUpdateForm, ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm, DepositRecordForm,
     ManualIrregularityForm, IrregularityResolveForm, DateRangeForm, YearForm,
     ReconciliationFinaliseForm, AccountingPeriodLockForm, ReconciliationBankStatementForm, ReconciliationBankLineForm,
     ControlledMoneyAccountForm, ControlledMoneyReceiptForm, ControlledMoneyWithdrawalForm,
@@ -363,6 +363,115 @@ class ReverseTransactionView(AdminOrAccountantMixin, View):
             messages.error(request, str(e))
         ledger = txn.matter_ledger
         return redirect(reverse('trust:account_detail', kwargs={'pk': ledger.trust_account_id}))
+
+
+class DepositRecordListView(AdminOrAccountantMixin, ListView):
+    model = DepositRecord
+    template_name = 'trust/deposit_record_list.html'
+    context_object_name = 'deposit_records'
+
+    def get_queryset(self):
+        return (
+            scope_trust_queryset_for_user(
+                DepositRecord.objects.select_related('trust_account', 'prepared_by'),
+                self.request.user,
+                firm_lookup='trust_account__firm',
+            )
+            .order_by('-deposit_date', '-deposit_number')
+        )
+
+
+class DepositRecordCreateView(AdminOrAccountantMixin, FormView):
+    form_class = DepositRecordForm
+    template_name = 'trust/deposit_record_form.html'
+
+    def get_trust_account(self):
+        queryset = scope_trust_queryset_for_user(TrustAccount.objects.all(), self.request.user, firm_lookup='firm')
+        return get_object_or_404(queryset, pk=self.kwargs['pk'])
+
+    def get_initial(self):
+        initial = super().get_initial()
+        deposit_type = self.request.GET.get('type')
+        if deposit_type in {'cash', 'cheque'}:
+            initial['deposit_type'] = deposit_type
+        return initial
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['trust_account'] = self.get_trust_account()
+        kwargs['deposit_type'] = self.request.POST.get('deposit_type') or self.request.GET.get('type')
+        return kwargs
+
+    def form_valid(self, form):
+        trust_account = self.get_trust_account()
+        last = DepositRecord.objects.filter(trust_account=trust_account).order_by('-deposit_number').first()
+        next_number = (last.deposit_number + 1) if last else 1
+
+        with transaction.atomic():
+            deposit = DepositRecord.objects.create(
+                trust_account=trust_account,
+                deposit_number=next_number,
+                deposit_type=form.cleaned_data['deposit_type'],
+                deposit_date=form.cleaned_data['deposit_date'],
+                prepared_by=self.request.user,
+                notes=form.cleaned_data.get('notes', ''),
+            )
+            for receipt in form.cleaned_data['receipt_objects']:
+                receipt.deposit_record = deposit
+                receipt.transaction.date_banked = deposit.deposit_date
+                receipt.transaction.save(update_fields=['date_banked'])
+                receipt.save(update_fields=['deposit_record'])
+
+        messages.success(self.request, f'{deposit.get_deposit_type_display()} #{deposit.deposit_number} created.')
+        return redirect(reverse('trust:deposit_record_detail', kwargs={'pk': deposit.pk}))
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        trust_account = self.get_trust_account()
+        ctx['trust_account'] = trust_account
+        ctx['cash_count'] = Receipt.objects.filter(transaction__matter_ledger__trust_account=trust_account, payment_method='cash', deposit_record__isnull=True).count()
+        ctx['cheque_count'] = Receipt.objects.filter(transaction__matter_ledger__trust_account=trust_account, payment_method='cheque', deposit_record__isnull=True).count()
+        return ctx
+
+
+class DepositRecordDetailView(AdminOrAccountantMixin, DetailView):
+    model = DepositRecord
+    template_name = 'trust/deposit_record_detail.html'
+    context_object_name = 'deposit_record'
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            DepositRecord.objects.select_related('trust_account', 'prepared_by'),
+            self.request.user,
+            firm_lookup='trust_account__firm',
+        )
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['receipts'] = self.object.receipts.select_related(
+            'transaction',
+            'transaction__matter_ledger',
+            'transaction__matter_ledger__matter',
+        ).order_by('receipt_number')
+        return ctx
+
+
+class DepositRecordPDFView(AdminOrAccountantMixin, DetailView):
+    model = DepositRecord
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            DepositRecord.objects.select_related('trust_account', 'prepared_by'),
+            self.request.user,
+            firm_lookup='trust_account__firm',
+        )
+
+    def get(self, request, *args, **kwargs):
+        deposit_record = self.get_object()
+        pdf = trust_reports.deposit_record_pdf_bytes(deposit_record)
+        response = HttpResponse(pdf, content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="deposit-record-{deposit_record.deposit_number}.pdf"'
+        return response
 
 
 class ReconciliationListView(StaffRequiredMixin, ListView):

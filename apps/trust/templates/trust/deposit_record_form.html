@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% load crispy_forms_tags %}
+{% block title %}New Deposit Record – Matter Funds{% endblock %}
+{% block content %}
+<h1>New Deposit Record</h1>
+<p class="text-muted">{{ trust_account }}</p>
+
+<div class="alert alert-info">
+  Create separate records for cash deposits and cheque deposits. EFT, direct deposit and credit card receipts do not require deposit records.
+</div>
+
+<p>
+  Available cash receipts: <strong>{{ cash_count }}</strong><br>
+  Available cheque receipts: <strong>{{ cheque_count }}</strong>
+</p>
+
+<form method="post">
+  {% csrf_token %}
+  {{ form|crispy }}
+  <button type="submit" class="btn btn-primary">Create Deposit Record</button>
+  <a href="{% url 'trust:account_detail' trust_account.pk %}" class="btn btn-secondary">Cancel</a>
+</form>
+{% endblock %}

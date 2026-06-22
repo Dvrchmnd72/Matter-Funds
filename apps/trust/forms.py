@@ -5,7 +5,7 @@ from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
 from apps.clients.models import Client
 from apps.matters.models import Matter
-from .models import MatterLedger, MonthlyReconciliation, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ReconciliationBankLine
+from .models import MatterLedger, MonthlyReconciliation, DepositRecord, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ReconciliationBankLine
 
 
 class TrustAccountUpdateForm(forms.ModelForm):
@@ -293,6 +293,78 @@ class TrustJournalForm(forms.Form):
         self.helper.add_input(Submit('submit', 'Create Trust Journal Transfer'))
 
 
+
+
+class DepositRecordForm(forms.Form):
+    deposit_type = forms.ChoiceField(
+        choices=DepositRecord.DEPOSIT_TYPE_CHOICES,
+        label='Deposit record type',
+        help_text='Cash and cheque deposits are recorded separately.'
+    )
+    deposit_date = forms.DateField(
+        label='Date deposited to trust account',
+        widget=forms.DateInput(attrs={'type': 'date'}),
+    )
+    receipts = forms.MultipleChoiceField(
+        label='Receipts included in this deposit',
+        required=True,
+        widget=forms.CheckboxSelectMultiple,
+    )
+    notes = forms.CharField(
+        label='Notes',
+        required=False,
+        widget=forms.Textarea(attrs={'rows': 2}),
+    )
+
+    def __init__(self, *args, trust_account=None, deposit_type=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.trust_account = trust_account
+        selected_type = deposit_type or self.data.get('deposit_type') or self.initial.get('deposit_type') or 'cash'
+        qs = Receipt.objects.none()
+        if trust_account and selected_type in {'cash', 'cheque'}:
+            qs = (
+                Receipt.objects
+                .filter(
+                    transaction__matter_ledger__trust_account=trust_account,
+                    payment_method=selected_type,
+                    deposit_record__isnull=True,
+                )
+                .select_related('transaction', 'transaction__matter_ledger__matter')
+                .order_by('transaction__date_received_or_paid', 'receipt_number')
+            )
+
+        self.fields['receipts'].choices = [
+            (
+                str(receipt.pk),
+                f"R{receipt.receipt_number} | {receipt.transaction.date_received_or_paid} | "
+                f"${receipt.transaction.amount} | {receipt.payor_name} | "
+                f"{receipt.transaction.matter_ledger.matter.file_number or receipt.transaction.matter_ledger.matter.pk}"
+            )
+            for receipt in qs
+        ]
+
+    def clean(self):
+        cleaned = super().clean()
+        deposit_type = cleaned.get('deposit_type')
+        receipt_ids = cleaned.get('receipts') or []
+
+        if not self.trust_account or not deposit_type or not receipt_ids:
+            return cleaned
+
+        receipts = Receipt.objects.filter(pk__in=receipt_ids).select_related('transaction__matter_ledger__trust_account')
+        if receipts.count() != len(receipt_ids):
+            raise forms.ValidationError('One or more selected receipts could not be found.')
+
+        for receipt in receipts:
+            if receipt.deposit_record_id:
+                raise forms.ValidationError(f'Receipt R{receipt.receipt_number} is already included in a deposit record.')
+            if receipt.payment_method != deposit_type:
+                raise forms.ValidationError('Selected receipts must match the deposit record type.')
+            if receipt.transaction.matter_ledger.trust_account_id != self.trust_account.pk:
+                raise forms.ValidationError('Selected receipts must belong to this trust account.')
+
+        cleaned['receipt_objects'] = list(receipts)
+        return cleaned
 
 
 class ReconciliationForm(forms.ModelForm):
