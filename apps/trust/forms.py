@@ -115,7 +115,7 @@ class PaymentForm(forms.Form):
         help_text='Trust withdrawals must be made by cheque or EFT only.'
     )
     payment_reference_override = forms.CharField(
-        label='Payment / EFT reference override',
+        label='Payment / EFT reference',
         max_length=80,
         required=False,
         help_text='Optional. Leave blank to use the next Matter Funds payment/EFT reference number automatically.'
@@ -125,7 +125,7 @@ class PaymentForm(forms.Form):
         label='Cheque number',
         max_length=50,
         required=False,
-        help_text='Required for cheque payments. EFT payments use the generated payment number as the EFT reference.'
+        help_text='Optional. Leave blank to use the next Matter Funds payment/EFT reference automatically.'
     )
     purpose = forms.CharField(label='Reason / purpose of payment', max_length=500)
 
