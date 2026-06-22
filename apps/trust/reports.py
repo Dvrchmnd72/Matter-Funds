@@ -1870,3 +1870,33 @@ def deposit_record_pdf_bytes(deposit_record):
         ['Receipt', 'Receipt date', 'Received from', 'Matter', 'Matter description', 'Amount'],
     )
     return buffer.getvalue()
+
+def outstanding_cheques_pdf_bytes(trust_account, rows, totals):
+    pdf_rows = []
+    for row in rows:
+        pdf_rows.append([
+            row['payment_number'],
+            row['cheque_number'],
+            str(row['date_issued']),
+            row['matter'],
+            row['payee'],
+            str(row['amount']),
+            str(row['days_outstanding']),
+            row['age_band'],
+        ])
+
+    pdf_rows.append(['', '', '', '', 'Current total', str(totals['current_total']), '', ''])
+    pdf_rows.append(['', '', '', '', 'Review required total', str(totals['review_total']), '', ''])
+    pdf_rows.append(['', '', '', '', 'Stale cheque total', str(totals['stale_total']), '', ''])
+    pdf_rows.append(['', '', '', '', 'Grand total', str(totals['grand_total']), '', ''])
+
+    buffer = io.BytesIO()
+    _build_pdf_document(
+        buffer,
+        trust_account,
+        'Outstanding Cheques Report',
+        f"Report date {timezone.localdate()}",
+        pdf_rows,
+        ['Payment', 'Cheque no.', 'Date issued', 'Matter', 'Payee', 'Amount', 'Days', 'Age band'],
+    )
+    return buffer.getvalue()

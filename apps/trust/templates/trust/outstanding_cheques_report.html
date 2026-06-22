@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Outstanding Cheques – Matter Funds{% endblock %}
+{% block content %}
+<h1>Outstanding Cheques Report</h1>
+
+<p class="text-muted">
+  {{ trust_account }}<br>
+  Report date: {{ report_date }}
+</p>
+
+<div class="alert alert-info">
+  This report lists cheque trust payments that have been issued and not reversed. It assists monthly review of payments in the cash book that have not yet appeared on the authorised ADI statement.
+</div>
+
+<div class="mb-3">
+  <a href="{% url 'trust:reports' %}" class="btn btn-secondary">Back to Reports</a>
+  <a href="{% url 'trust:outstanding_cheques_pdf' trust_account.pk %}?age={{ age_filter }}" class="btn btn-primary">Download PDF</a>
+</div>
+
+<form method="get" class="row g-2 mb-4">
+  <div class="col-auto">
+    <select name="age" class="form-select">
+      <option value="all" {% if age_filter == "all" %}selected{% endif %}>All</option>
+      <option value="current" {% if age_filter == "current" %}selected{% endif %}>Current (&lt; 90 days)</option>
+      <option value="review" {% if age_filter == "review" %}selected{% endif %}>Review required (90-179 days)</option>
+      <option value="stale" {% if age_filter == "stale" %}selected{% endif %}>Stale cheque (180+ days)</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <button type="submit" class="btn btn-outline-primary">Apply filter</button>
+  </div>
+</form>
+
+<div class="row mb-4">
+  <div class="col-md-3"><div class="card card-body"><strong>{{ rows|length }}</strong><span class="text-muted">Outstanding cheques</span></div></div>
+  <div class="col-md-3"><div class="card card-body"><strong>${{ totals.current_total }}</strong><span class="text-muted">Current</span></div></div>
+  <div class="col-md-3"><div class="card card-body"><strong>${{ totals.review_total }}</strong><span class="text-muted">Review required</span></div></div>
+  <div class="col-md-3"><div class="card card-body"><strong>${{ totals.stale_total }}</strong><span class="text-muted">Stale cheque</span></div></div>
+</div>
+
+<table class="table table-striped table-sm align-middle">
+  <thead>
+    <tr>
+      <th>Payment ref</th>
+      <th>Cheque no.</th>
+      <th>Date issued</th>
+      <th>Matter</th>
+      <th>Payee</th>
+      <th class="text-end">Amount</th>
+      <th class="text-end">Days outstanding</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      <td>{{ row.payment_number }}</td>
+      <td>{{ row.cheque_number }}</td>
+      <td>{{ row.date_issued }}</td>
+      <td>{{ row.matter }}</td>
+      <td>{{ row.payee }}</td>
+      <td class="text-end">${{ row.amount }}</td>
+      <td class="text-end">{{ row.days_outstanding }}</td>
+      <td>
+        {% if row.age_band_key == "stale" %}
+          <span class="badge bg-danger">{{ row.age_band }}</span>
+        {% elif row.age_band_key == "review" %}
+          <span class="badge bg-warning text-dark">{{ row.age_band }}</span>
+        {% else %}
+          <span class="badge bg-success">{{ row.age_band }}</span>
+        {% endif %}
+      </td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="8">No outstanding cheque payments found.</td></tr>
+    {% endfor %}
+  </tbody>
+  <tfoot>
+    <tr>
+      <th colspan="5" class="text-end">Grand total</th>
+      <th class="text-end">${{ totals.grand_total }}</th>
+      <th colspan="2"></th>
+    </tr>
+  </tfoot>
+</table>
+{% endblock %}

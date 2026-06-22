@@ -1241,6 +1241,111 @@ def build_reports_context(request, trial_balance_account_id=None, trial_balance_
     }
 
 
+def _outstanding_cheque_rows(trust_account, age_filter='all'):
+    today = timezone.localdate()
+    payments = (
+        Payment.objects
+        .filter(
+            transaction__matter_ledger__trust_account=trust_account,
+            payment_method='cheque',
+            transaction__is_reversed=False,
+        )
+        .select_related(
+            'transaction',
+            'transaction__matter_ledger',
+            'transaction__matter_ledger__matter',
+            'transaction__matter_ledger__matter__client',
+        )
+        .order_by('transaction__date_received_or_paid', 'payment_number')
+    )
+
+    rows = []
+    totals = {
+        'current_total': Decimal('0.00'),
+        'review_total': Decimal('0.00'),
+        'stale_total': Decimal('0.00'),
+        'grand_total': Decimal('0.00'),
+    }
+
+    for payment in payments:
+        issued = payment.transaction.date_received_or_paid
+        days = max((today - issued).days, 0)
+
+        if days >= 180:
+            band_key = 'stale'
+            band_label = 'Stale cheque'
+        elif days >= 90:
+            band_key = 'review'
+            band_label = 'Review required'
+        else:
+            band_key = 'current'
+            band_label = 'Current'
+
+        if age_filter != 'all' and age_filter != band_key:
+            continue
+
+        amount = payment.transaction.amount
+        totals[f'{band_key}_total'] += amount
+        totals['grand_total'] += amount
+
+        matter = payment.transaction.matter_ledger.matter
+        rows.append({
+            'payment_number': payment.display_payment_reference,
+            'cheque_number': payment.cheque_number or '-',
+            'date_issued': issued,
+            'matter': f"{matter.file_number or matter.pk} - {matter.description}",
+            'payee': payment.payee_name,
+            'amount': amount,
+            'days_outstanding': days,
+            'age_band_key': band_key,
+            'age_band': band_label,
+        })
+
+    return rows, totals
+
+
+class OutstandingChequesReportView(AdminOrAccountantMixin, TemplateView):
+    template_name = 'trust/outstanding_cheques_report.html'
+
+    def get_trust_account(self):
+        queryset = scope_trust_queryset_for_user(TrustAccount.objects.all(), self.request.user, firm_lookup='firm')
+        return get_object_or_404(queryset, pk=self.kwargs['pk'])
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        trust_account = self.get_trust_account()
+        age_filter = self.request.GET.get('age', 'all')
+        if age_filter not in {'all', 'current', 'review', 'stale'}:
+            age_filter = 'all'
+
+        rows, totals = _outstanding_cheque_rows(trust_account, age_filter)
+        ctx.update({
+            'trust_account': trust_account,
+            'rows': rows,
+            'totals': totals,
+            'age_filter': age_filter,
+            'report_date': timezone.localdate(),
+        })
+        return ctx
+
+
+class OutstandingChequesPDFView(AdminOrAccountantMixin, View):
+    def get_trust_account(self):
+        queryset = scope_trust_queryset_for_user(TrustAccount.objects.all(), self.request.user, firm_lookup='firm')
+        return get_object_or_404(queryset, pk=self.kwargs['pk'])
+
+    def get(self, request, *args, **kwargs):
+        trust_account = self.get_trust_account()
+        age_filter = request.GET.get('age', 'all')
+        if age_filter not in {'all', 'current', 'review', 'stale'}:
+            age_filter = 'all'
+        rows, totals = _outstanding_cheque_rows(trust_account, age_filter)
+        pdf = trust_reports.outstanding_cheques_pdf_bytes(trust_account, rows, totals)
+        response = HttpResponse(pdf, content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="outstanding-cheques.pdf"'
+        return response
+
+
 class ReportsLandingView(StaffRequiredMixin, TemplateView):
     template_name = 'trust/reports.html'
 
