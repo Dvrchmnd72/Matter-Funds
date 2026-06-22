@@ -308,7 +308,7 @@ def payments_cash_book_pdf_bytes(trust_account, date_from, date_to):
             rows.append([
                 str(txn.date_received_or_paid),
                 "Payment reversal",
-                str(payment.payment_number) if payment else f"Transaction #{original.pk}",
+                payment.display_payment_reference if payment else f"Transaction #{original.pk}",
                 payment.cheque_number if payment and payment.cheque_number else "",
                 str(txn.matter_ledger.matter),
                 payment.payee_name if payment else "",
@@ -332,7 +332,7 @@ def payments_cash_book_pdf_bytes(trust_account, date_from, date_to):
         rows.append([
             str(txn.date_received_or_paid),
             txn.get_transaction_type_display(),
-            str(payment.payment_number) if payment else "",
+            payment.display_payment_reference if payment else "",
             payment.cheque_number if payment and payment.cheque_number else "",
             str(txn.matter_ledger.matter),
             payment.payee_name if payment else "",
@@ -1657,7 +1657,7 @@ def payment_pdf(payment):
         ["Expression", "Law Practice Trust Account"],
         ["Withdrawal type", txn.get_transaction_type_display()],
         ["Withdrawal method", payment.get_payment_method_display()],
-        ["Payment / EFT reference", str(payment.payment_number)],
+        ["Payment / EFT reference", payment.display_payment_reference],
         ["Date of cheque / EFT", str(txn.date_received_or_paid)],
         ["Amount ordered to be paid", f"${txn.amount}"],
         ["Pay to / payee", payment.payee_name],

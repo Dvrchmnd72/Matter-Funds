@@ -443,6 +443,7 @@ class Receipt(models.Model):
     payor_name = models.CharField(max_length=255)
     payment_method = models.CharField(max_length=20, choices=PAYMENT_METHOD_CHOICES)
     cheque_number = models.CharField(max_length=50, blank=True)
+    payment_reference_override = models.CharField(max_length=80, blank=True)
     purpose = models.CharField(max_length=500)
     late_banking = models.BooleanField(default=False)
 

@@ -378,6 +378,7 @@ class ReconciliationListView(StaffRequiredMixin, ListView):
         )
 
 
+
 class ReconciliationCreateView(AdminOrAccountantMixin, CreateView):
     model = MonthlyReconciliation
     form_class = ReconciliationForm
@@ -387,23 +388,105 @@ class ReconciliationCreateView(AdminOrAccountantMixin, CreateView):
         queryset = scope_trust_queryset_for_user(TrustAccount.objects.all(), self.request.user, firm_lookup='firm')
         return get_object_or_404(queryset, pk=self.kwargs['pk'])
 
+    def _last_reconciliation(self, trust_account):
+        return (
+            MonthlyReconciliation.objects
+            .filter(trust_account=trust_account)
+            .order_by('-period_end')
+            .first()
+        )
+
+    def _suggested_period_end(self, trust_account):
+        import calendar
+
+        last = self._last_reconciliation(trust_account)
+        if last:
+            year = last.period_end.year
+            month = last.period_end.month + 1
+            if month == 13:
+                year += 1
+                month = 1
+            day = calendar.monthrange(year, month)[1]
+            return datetime.date(year, month, day)
+
+        today = timezone.localdate()
+        first_day_this_month = today.replace(day=1)
+        return first_day_this_month - datetime.timedelta(days=1)
+
+    def _balance_preview(self, trust_account, period_end):
+        if not period_end:
+            return None
+
+        period_start = period_end.replace(day=1)
+        opening, receipts, payments, closing = trust_reports._cash_book_amounts_for_period(
+            trust_account,
+            period_start,
+            period_end,
+        )
+        ledger_balances = trust_reports.calculate_ledger_balances_as_at(trust_account, period_end)
+        ledger_total = sum(ledger_balances.values(), Decimal('0.00'))
+
+        return {
+            'period_start': period_start,
+            'period_end': period_end,
+            'opening_balance': opening,
+            'receipts_total': receipts,
+            'payments_total': payments,
+            'cash_book_balance': closing,
+            'ledger_total_balance': ledger_total,
+            'variance': closing - ledger_total,
+        }
+
+    def get_initial(self):
+        initial = super().get_initial()
+        trust_account = self.get_trust_account()
+        initial['period_end'] = self._suggested_period_end(trust_account)
+        return initial
+
     def form_valid(self, form):
         trust_account = self.get_trust_account()
-        period = services.get_or_create_accounting_period(trust_account, form.cleaned_data['period_end'])
+        period_end = form.cleaned_data['period_end']
+        period = services.get_or_create_accounting_period(trust_account, period_end)
+
         if period.status == TrustAccountingPeriod.STATUS_LOCKED:
             form.add_error('period_end', 'This accounting period is locked.')
             return self.form_invalid(form)
+
+        preview = self._balance_preview(trust_account, period_end)
+
         form.instance.trust_account = trust_account
         form.instance.accounting_period = period
-        messages.success(self.request, 'Reconciliation saved.')
+        form.instance.cash_book_balance = preview['cash_book_balance']
+        form.instance.ledger_total_balance = preview['ledger_total_balance']
+
+        form.instance.unpresented_cheques_total = Decimal('0.00')
+        form.instance.outstanding_deposits_total = Decimal('0.00')
+
+        for field_name in [
+            'other_payments_not_in_adi_total',
+            'credits_not_in_cash_book_total',
+            'debits_not_in_cash_book_total',
+        ]:
+            if hasattr(form.instance, field_name):
+                setattr(form.instance, field_name, Decimal('0.00'))
+
+        messages.success(
+            self.request,
+            f'Reconciliation started. Matter Funds calculated cash book balance ${preview["cash_book_balance"]} '
+            f'and ledger total ${preview["ledger_total_balance"]}. Complete the ADI matching worksheet next.'
+        )
         return super().form_valid(form)
 
     def get_success_url(self):
-        return reverse('trust:reconciliation_detail', kwargs={'pk': self.object.pk})
+        return reverse('trust:reconciliation_worksheet', kwargs={'pk': self.object.pk})
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
-        ctx['trust_account'] = self.get_trust_account()
+        trust_account = self.get_trust_account()
+        suggested_period_end = self.get_initial().get('period_end')
+        ctx['trust_account'] = trust_account
+        ctx['last_reconciliation'] = self._last_reconciliation(trust_account)
+        ctx['balance_preview'] = self._balance_preview(trust_account, suggested_period_end)
         return ctx
 
 
@@ -588,6 +671,67 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
         )
         buckets = self._worksheet_buckets(reconciliation, internal_transactions, bank_lines)
 
+        matched_line_by_txn = {
+            line.matched_transaction_id: line
+            for line in bank_lines
+            if line.matched_transaction_id
+        }
+
+        cash_book_rows = []
+        for txn in internal_transactions:
+            direction = _cash_book_direction(txn)
+            if not direction:
+                continue
+
+            source_ref = f"Txn {txn.pk}"
+            source_name = txn.get_transaction_type_display()
+            try:
+                if txn.transaction_type == 'receipt':
+                    source_ref = f"R{txn.receipt.receipt_number}"
+                    source_name = "Receipt"
+                elif txn.transaction_type in {'payment', 'transfer_to_office'}:
+                    source_ref = f"P{txn.payment.payment_number}"
+                    source_name = "Payment" if txn.transaction_type == 'payment' else "Transfer to office"
+                elif txn.transaction_type == 'reversal' and txn.reverses_id:
+                    source_name = "Reversal"
+                    source_ref = f"Txn {txn.reverses_id} reversal"
+            except Exception:
+                pass
+
+            matched_line = matched_line_by_txn.get(txn.pk)
+            cash_book_rows.append({
+                'id': txn.pk,
+                'date': txn.date_received_or_paid,
+                'source': source_name,
+                'source_ref': source_ref,
+                'matter': txn.matter_ledger.matter,
+                'description': txn.description,
+                'debit': txn.amount if direction == 'debit' else '',
+                'credit': txn.amount if direction == 'credit' else '',
+                'direction': direction,
+                'matched_line': matched_line,
+                'status': 'Matched' if matched_line else 'Unmatched',
+            })
+
+        outstanding_deposits_total = _money_sum(buckets['outstanding_deposits'])
+        unpresented_cheques_total = _money_sum(buckets['unpresented_cheques'])
+        other_payments_not_in_adi_total = _money_sum(buckets['other_payments_not_in_adi'])
+        credits_not_in_cash_book_total = _money_sum(buckets['unmatched_bank_credits'])
+        debits_not_in_cash_book_total = _money_sum(buckets['unmatched_bank_debits'])
+        total_adjustments = -credits_not_in_cash_book_total + debits_not_in_cash_book_total
+        reconciled_bank_balance_preview = (
+            reconciliation.bank_statement_balance
+            + outstanding_deposits_total
+            - unpresented_cheques_total
+            - other_payments_not_in_adi_total
+            + total_adjustments
+        )
+        difference_preview = reconciled_bank_balance_preview - reconciliation.cash_book_balance
+
+        bank_cash_book_difference_preview = reconciliation.bank_statement_balance - reconciliation.cash_book_balance
+        recorded_adjustments_total_preview = credits_not_in_cash_book_total - debits_not_in_cash_book_total
+        remaining_difference_preview = bank_cash_book_difference_preview - recorded_adjustments_total_preview
+
         ctx.update({
             'reconciliation': reconciliation,
             'period_start': self._period_start(reconciliation),
@@ -598,6 +742,18 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
                 for txn in internal_transactions
             ],
             'prior_uncleared_adjustments': list(self._prior_uncleared_adjustments(reconciliation)),
+            'cash_book_rows': cash_book_rows,
+            'outstanding_deposits_total_preview': outstanding_deposits_total,
+            'unpresented_cheques_total_preview': unpresented_cheques_total,
+            'other_payments_not_in_adi_total_preview': other_payments_not_in_adi_total,
+            'credits_not_in_cash_book_total_preview': credits_not_in_cash_book_total,
+            'debits_not_in_cash_book_total_preview': debits_not_in_cash_book_total,
+            'total_adjustments_preview': total_adjustments,
+            'reconciled_bank_balance_preview': reconciled_bank_balance_preview,
+            'difference_preview': difference_preview,
+            'bank_cash_book_difference_preview': bank_cash_book_difference_preview,
+            'recorded_adjustments_total_preview': recorded_adjustments_total_preview,
+            'remaining_difference_preview': remaining_difference_preview,
             'outstanding_deposits': buckets['outstanding_deposits'],
             'unpresented_cheques': buckets['unpresented_cheques'],
             'other_payments_not_in_adi': buckets['other_payments_not_in_adi'],
@@ -618,14 +774,55 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
 
         action = request.POST.get('action')
 
+        if action == 'confirm_transaction':
+            txn = get_object_or_404(
+                self._internal_transactions(reconciliation),
+                pk=request.POST.get('transaction_id'),
+            )
+
+            direction = _cash_book_direction(txn)
+            if direction not in {'credit', 'debit'}:
+                messages.error(request, 'Only cash book receipt/payment entries can be confirmed against the bank statement.')
+                return redirect(reverse('trust:reconciliation_worksheet', kwargs={'pk': reconciliation.pk}))
+
+            existing = reconciliation.bank_lines.filter(matched_transaction=txn).first()
+            if existing:
+                messages.info(request, 'This cash book entry is already confirmed on the bank statement.')
+                return redirect(reverse('trust:reconciliation_worksheet', kwargs={'pk': reconciliation.pk}))
+
+            ReconciliationBankLine.objects.create(
+                reconciliation=reconciliation,
+                line_date=request.POST.get('statement_date') or txn.date_received_or_paid,
+                line_type=direction,
+                amount=txn.amount,
+                description=request.POST.get('statement_description') or txn.description,
+                reference=request.POST.get('statement_reference', ''),
+                adjustment_category=ReconciliationBankLine.ADJUSTMENT_CATEGORY_MATCHED,
+                matched_transaction=txn,
+                created_by=request.user,
+                matched_by=request.user,
+                matched_at=timezone.now(),
+            )
+            self._update_totals_from_worksheet(reconciliation)
+            messages.success(request, 'Cash book entry confirmed on authorised ADI bank statement.')
+            return redirect(reverse('trust:reconciliation_worksheet', kwargs={'pk': reconciliation.pk}))
+
         if action == 'add_line':
             form = ReconciliationBankLineForm(request.POST)
             if form.is_valid():
                 line = form.save(commit=False)
                 line.reconciliation = reconciliation
                 line.created_by = request.user
-                line.save()
-                messages.success(request, 'Authorised ADI statement line added.')
+                if not line.adjustment_category:
+                    line.adjustment_category = ReconciliationBankLine.ADJUSTMENT_CATEGORY_OTHER
+                line.carry_forward_until_cleared = True
+                try:
+                    line.save()
+                except ValidationError as exc:
+                    messages.error(request, exc.messages[0] if hasattr(exc, 'messages') and exc.messages else exc)
+                    return redirect(reverse('trust:reconciliation_worksheet', kwargs={'pk': reconciliation.pk}))
+                self._update_totals_from_worksheet(reconciliation)
+                messages.success(request, 'Reconciliation adjustment recorded.')
             else:
                 messages.error(request, form.errors.as_text())
 
@@ -680,7 +877,8 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
         elif action == 'delete_line':
             line = get_object_or_404(reconciliation.bank_lines.all(), pk=request.POST.get('line_id'))
             line.delete()
-            messages.success(request, 'Authorised ADI statement line removed.')
+            self._update_totals_from_worksheet(reconciliation)
+            messages.success(request, 'Reconciliation adjustment removed.')
 
         else:
             messages.error(request, 'Unknown worksheet action.')

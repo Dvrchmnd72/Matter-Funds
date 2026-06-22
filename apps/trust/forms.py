@@ -114,6 +114,13 @@ class PaymentForm(forms.Form):
         choices=[('cheque', 'Cheque'), ('eft', 'EFT')],
         help_text='Trust withdrawals must be made by cheque or EFT only.'
     )
+    payment_reference_override = forms.CharField(
+        label='Payment / EFT reference override',
+        max_length=80,
+        required=False,
+        help_text='Optional. Leave blank to use the next Matter Funds payment/EFT reference number automatically.'
+    )
+
     cheque_number = forms.CharField(
         label='Cheque number',
         max_length=50,
@@ -286,21 +293,34 @@ class TrustJournalForm(forms.Form):
         self.helper.add_input(Submit('submit', 'Create Trust Journal Transfer'))
 
 
+
+
 class ReconciliationForm(forms.ModelForm):
     class Meta:
         model = MonthlyReconciliation
-        fields = [
-            'period_end', 'cash_book_balance', 'ledger_total_balance',
-            'bank_statement_balance', 'unpresented_cheques_total',
-            'outstanding_deposits_total', 'bank_statement_pdf',
-        ]
-        widgets = {'period_end': forms.DateInput(attrs={'type': 'date'})}
+        fields = ['period_end', 'bank_statement_balance', 'bank_statement_pdf']
+        widgets = {
+            'period_end': forms.DateInput(attrs={'type': 'date'}),
+        }
+        labels = {
+            'period_end': 'Bank statement ending date / reconciliation period end',
+            'bank_statement_balance': 'Bank statement ending balance',
+            'bank_statement_pdf': 'Bank statement PDF',
+        }
+        help_texts = {
+            'period_end': 'Use the month-end date shown on the authorised ADI trust bank statement.',
+            'bank_statement_balance': 'Enter the closing balance shown on the authorised ADI trust bank statement.',
+            'bank_statement_pdf': 'Optional: upload the bank statement used for this reconciliation.',
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields['bank_statement_balance'].widget.attrs.update({
+            'placeholder': 'From bank statement',
+        })
         self.helper = FormHelper()
         self.helper.form_tag = False
-        self.helper.add_input(Submit('submit', 'Save Reconciliation'))
+        self.helper.add_input(Submit('submit', 'Begin Reconciliation'))
 
     def clean_period_end(self):
         period_end = self.cleaned_data['period_end']

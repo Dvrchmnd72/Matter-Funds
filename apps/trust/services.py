@@ -303,7 +303,7 @@ def create_receipt(*, matter_ledger, amount, date_received, date_banked=None,
 
 
 def create_payment(*, matter_ledger, amount, date_paid, payee_name, payee_bsb='',
-                   payee_account='', payment_method, cheque_number='', purpose,
+                   payee_account='', payment_method, cheque_number='', payment_reference_override='', purpose,
                    authorised_by, created_by):
     amount = _quantize(amount)
     _validate_not_future(date_paid, 'Trust payment date paid')
@@ -366,7 +366,7 @@ def _validate_costs_withdrawal_evidence(*, costs_withdrawal_method, costs_eviden
 
 
 def create_transfer_to_office(*, matter_ledger, amount, date_paid, payee_name, payee_bsb='',
-                              payee_account='', payment_method, cheque_number='', purpose,
+                              payee_account='', payment_method, cheque_number='', payment_reference_override='', purpose,
                               authorised_by, created_by,
                               costs_withdrawal_method, key_evidence_date=None,
                               costs_evidence_file=None, notice_or_request_file=None,
