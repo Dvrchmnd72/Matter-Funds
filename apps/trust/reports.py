@@ -1856,7 +1856,7 @@ def deposit_record_pdf_bytes(deposit_record):
 
     rows.append(['', '', '', '', 'Total deposited', str(deposit_record.total_amount)])
     rows.append(['', '', '', '', 'Prepared by', str(deposit_record.prepared_by)])
-    rows.append(['', '', '', '', 'Prepared at', str(deposit_record.prepared_at)])
+    rows.append(['', '', '', '', 'Prepared at', timezone.localtime(deposit_record.prepared_at).strftime('%d %b %Y, %I:%M %p %Z')])
     if deposit_record.notes:
         rows.append(['', '', '', '', 'Notes', deposit_record.notes])
 
