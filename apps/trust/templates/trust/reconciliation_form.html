@@ -1,9 +1,63 @@
 {% extends "base.html" %}
 {% load crispy_forms_tags %}
-{% block title %}New Reconciliation – Matter Funds{% endblock %}
+{% block title %}Start Reconciliation – Matter Funds{% endblock %}
 {% block content %}
-<h1>New Reconciliation – {{ trust_account }}</h1>
-<div class="row"><div class="col-md-8">
-  <form method="post" enctype="multipart/form-data">{% csrf_token %}{{ form|crispy }}<button type="submit" class="btn btn-primary">Save Reconciliation</button></form>
-</div></div>
+<h1>Start Reconciliation – {{ trust_account }}</h1>
+
+<div class="alert alert-info">
+  Enter the authorised ADI trust bank statement ending date and ending balance.
+  Matter Funds calculates the trust cash book balance and ledger total balance from recorded receipts, payments, transfers and reversals, then opens the ADI matching worksheet.
+</div>
+
+<div class="row mb-4">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><strong>Last reconciliation</strong></div>
+      <div class="card-body">
+        {% if last_reconciliation %}
+          <dl class="row mb-0">
+            <dt class="col-sm-5">Period end</dt><dd class="col-sm-7">{{ last_reconciliation.period_end }}</dd>
+            <dt class="col-sm-5">Bank statement balance</dt><dd class="col-sm-7">${{ last_reconciliation.bank_statement_balance }}</dd>
+            <dt class="col-sm-5">Cash book balance</dt><dd class="col-sm-7">${{ last_reconciliation.cash_book_balance }}</dd>
+            <dt class="col-sm-5">Reconciled</dt><dd class="col-sm-7">{{ last_reconciliation.is_reconciled|yesno:"Yes,No" }}</dd>
+          </dl>
+        {% else %}
+          <p class="mb-0">No prior reconciliation found. Opening balance will be calculated from available Matter Funds trust records.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-header"><strong>Matter Funds calculated balance preview</strong></div>
+      <div class="card-body">
+        {% if balance_preview %}
+          <dl class="row mb-0">
+            <dt class="col-sm-6">Suggested period</dt><dd class="col-sm-6">{{ balance_preview.period_start }} to {{ balance_preview.period_end }}</dd>
+            <dt class="col-sm-6">Opening cash book balance</dt><dd class="col-sm-6">${{ balance_preview.opening_balance }}</dd>
+            <dt class="col-sm-6">Receipts for period</dt><dd class="col-sm-6">${{ balance_preview.receipts_total }}</dd>
+            <dt class="col-sm-6">Payments for period</dt><dd class="col-sm-6">${{ balance_preview.payments_total }}</dd>
+            <dt class="col-sm-6">Cash book balance</dt><dd class="col-sm-6">${{ balance_preview.cash_book_balance }}</dd>
+            <dt class="col-sm-6">Ledger total balance</dt><dd class="col-sm-6">${{ balance_preview.ledger_total_balance }}</dd>
+            <dt class="col-sm-6">Cash book / ledger variance</dt><dd class="col-sm-6">${{ balance_preview.variance }}</dd>
+          </dl>
+        {% else %}
+          <p class="mb-0">Select a period end date to calculate Matter Funds balances.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-md-8">
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      {{ form|crispy }}
+      <button type="submit" class="btn btn-primary">Begin Reconciliation</button>
+      <a href="{% url 'trust:account_detail' trust_account.pk %}" class="btn btn-secondary">Cancel</a>
+    </form>
+  </div>
+</div>
 {% endblock %}
