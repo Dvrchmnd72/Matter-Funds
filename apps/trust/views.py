@@ -419,8 +419,6 @@ class DepositRecordCreateView(AdminOrAccountantMixin, FormView):
             )
             for receipt in form.cleaned_data['receipt_objects']:
                 receipt.deposit_record = deposit
-                receipt.transaction.date_banked = deposit.deposit_date
-                receipt.transaction.save(update_fields=['date_banked'])
                 receipt.save(update_fields=['deposit_record'])
 
         messages.success(self.request, f'{deposit.get_deposit_type_display()} #{deposit.deposit_number} created.')
