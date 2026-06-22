@@ -1290,7 +1290,7 @@ def _outstanding_cheque_rows(trust_account, age_filter='all'):
 
         matter = payment.transaction.matter_ledger.matter
         rows.append({
-            'payment_number': payment.display_payment_reference,
+            'payment_number': payment.payment_reference_override or str(payment.payment_number),
             'cheque_number': payment.cheque_number or '-',
             'date_issued': issued,
             'matter': f"{matter.file_number or matter.pk} - {matter.description}",
