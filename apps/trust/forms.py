@@ -5,7 +5,7 @@ from crispy_forms.helper import FormHelper
 from crispy_forms.layout import Submit
 from apps.clients.models import Client
 from apps.matters.models import Matter
-from .models import MatterLedger, MonthlyReconciliation, DepositRecord, Receipt, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ReconciliationBankLine
+from .models import MatterLedger, MonthlyReconciliation, DepositRecord, Receipt, Irregularity, Payment, TrustAccount, TrustAccountingPeriod, ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ReconciliationBankLine, AuthorisedSignatory
 
 
 class TrustAccountUpdateForm(forms.ModelForm):
@@ -293,6 +293,37 @@ class TrustJournalForm(forms.Form):
         self.helper.add_input(Submit('submit', 'Create Trust Journal Transfer'))
 
 
+
+
+class AuthorisedSignatoryForm(forms.ModelForm):
+    class Meta:
+        model = AuthorisedSignatory
+        fields = [
+            'trust_account',
+            'name',
+            'address',
+            'email',
+            'role',
+            'practising_certificate_number',
+            'authorised_trust_cheques',
+            'authorised_trust_efts',
+            'authorised_controlled_money',
+            'authorised_from',
+            'authorised_to',
+            'is_active',
+            'notes',
+        ]
+        widgets = {
+            'authorised_from': forms.DateInput(attrs={'type': 'date'}),
+            'authorised_to': forms.DateInput(attrs={'type': 'date'}),
+            'address': forms.Textarea(attrs={'rows': 2}),
+            'notes': forms.Textarea(attrs={'rows': 2}),
+        }
+        labels = {
+            'authorised_trust_cheques': 'Authorised to sign trust cheques',
+            'authorised_trust_efts': 'Authorised to effect/direct/authorise trust EFTs',
+            'authorised_controlled_money': 'Authorised for controlled money withdrawals',
+        }
 
 
 class DepositRecordForm(forms.Form):

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Authorised Signatories – Matter Funds{% endblock %}
+{% block content %}
+<h1>Authorised Signatories</h1>
+
+<div class="alert alert-info">
+  Maintain associates and Australian legal practitioners authorised to sign trust cheques or effect, direct or authorise trust withdrawals.
+</div>
+
+<div class="mb-3">
+  <a href="{% url 'trust:authorised_signatory_create' %}" class="btn btn-primary">New Authorised Signatory</a>
+</div>
+
+<p><strong>{{ active_count }}</strong> active authorised signator{{ active_count|pluralize:"y,ies" }}.</p>
+
+<form method="get" class="mb-3">
+  <select name="status" class="form-select" style="max-width:220px; display:inline-block;">
+    <option value="active" {% if status_filter == "active" %}selected{% endif %}>Active only</option>
+    <option value="inactive" {% if status_filter == "inactive" %}selected{% endif %}>Inactive only</option>
+    <option value="all" {% if status_filter == "all" %}selected{% endif %}>All</option>
+  </select>
+  <button type="submit" class="btn btn-outline-primary">Apply</button>
+</form>
+
+<table class="table table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Name</th>
+      <th>Trust account</th>
+      <th>Role</th>
+      <th>Authorisations</th>
+      <th>Authorised from</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for s in signatories %}
+    <tr>
+      <td>{{ s.name }}<br><small class="text-muted">{{ s.email }}</small></td>
+      <td>{{ s.trust_account }}</td>
+      <td>{{ s.get_role_display }}</td>
+      <td>
+        {% if s.authorised_trust_cheques %}<span class="badge bg-primary">Trust cheques</span>{% endif %}
+        {% if s.authorised_trust_efts %}<span class="badge bg-primary">Trust EFTs</span>{% endif %}
+        {% if s.authorised_controlled_money %}<span class="badge bg-secondary">Controlled money</span>{% endif %}
+      </td>
+      <td>{{ s.authorised_from }}</td>
+      <td>{% if s.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}</td>
+      <td><a href="{% url 'trust:authorised_signatory_update' s.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="7">No authorised signatories recorded.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

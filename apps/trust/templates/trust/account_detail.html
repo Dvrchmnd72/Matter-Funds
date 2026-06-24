@@ -6,6 +6,7 @@
   <a href="{% url 'trust:deposit_record_create' account.pk %}?type=cash" class="btn btn-outline-primary">New Cash Deposit Record</a>
   <a href="{% url 'trust:deposit_record_create' account.pk %}?type=cheque" class="btn btn-outline-primary">New Cheque Deposit Record</a>
   <a href="{% url 'trust:deposit_record_list' %}" class="btn btn-outline-secondary">Deposit Records</a>
+  <a href="{% url 'trust:authorised_signatory_list' %}" class="btn btn-outline-secondary">Authorised Signatories</a>
 </div>
 
 <h1>{{ account.name }}</h1>

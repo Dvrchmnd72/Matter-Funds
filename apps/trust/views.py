@@ -19,14 +19,14 @@ from apps.trust import reports as trust_reports
 from .models import (
     TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment, TrustJournal,
     MonthlyReconciliation, DepositRecord, ReconciliationBankLine, Irregularity, TrustAccountingPeriod, TrustMonthlyRecord,
-    ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement,
+    ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, AuthorisedSignatory,
 )
 from .forms import (
     TrustAccountUpdateForm, ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm, DepositRecordForm,
     ManualIrregularityForm, IrregularityResolveForm, DateRangeForm, YearForm,
     ReconciliationFinaliseForm, AccountingPeriodLockForm, ReconciliationBankStatementForm, ReconciliationBankLineForm,
     ControlledMoneyAccountForm, ControlledMoneyReceiptForm, ControlledMoneyWithdrawalForm,
-    ControlledMoneyMonthlyStatementForm, ControlledMoneyPrincipalReviewForm,
+    ControlledMoneyMonthlyStatementForm, ControlledMoneyPrincipalReviewForm, AuthorisedSignatoryForm,
 )
 
 
@@ -365,6 +365,71 @@ class ReverseTransactionView(AdminOrAccountantMixin, View):
             messages.error(request, str(e))
         ledger = txn.matter_ledger
         return redirect(reverse('trust:account_detail', kwargs={'pk': ledger.trust_account_id}))
+
+
+class AuthorisedSignatoryListView(AdminOrAccountantMixin, ListView):
+    model = AuthorisedSignatory
+    template_name = 'trust/authorised_signatory_list.html'
+    context_object_name = 'signatories'
+
+    def get_queryset(self):
+        queryset = scope_trust_queryset_for_user(
+            AuthorisedSignatory.objects.select_related('trust_account'),
+            self.request.user,
+            firm_lookup='trust_account__firm',
+        )
+        status = self.request.GET.get('status', 'active')
+        if status == 'active':
+            queryset = queryset.filter(is_active=True)
+        elif status == 'inactive':
+            queryset = queryset.filter(is_active=False)
+        return queryset.order_by('trust_account__name', 'name')
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        scoped = scope_trust_queryset_for_user(
+            AuthorisedSignatory.objects.all(),
+            self.request.user,
+            firm_lookup='trust_account__firm',
+        )
+        ctx['active_count'] = scoped.filter(is_active=True).count()
+        ctx['status_filter'] = self.request.GET.get('status', 'active')
+        return ctx
+
+
+class AuthorisedSignatoryCreateView(AdminOrAccountantMixin, CreateView):
+    model = AuthorisedSignatory
+    form_class = AuthorisedSignatoryForm
+    template_name = 'trust/authorised_signatory_form.html'
+
+    def get_initial(self):
+        initial = super().get_initial()
+        trust_account_id = self.request.GET.get('trust_account')
+        if trust_account_id:
+            initial['trust_account'] = trust_account_id
+        initial.setdefault('is_active', True)
+        return initial
+
+    def get_success_url(self):
+        messages.success(self.request, 'Authorised signatory created.')
+        return reverse('trust:authorised_signatory_list')
+
+
+class AuthorisedSignatoryUpdateView(AdminOrAccountantMixin, UpdateView):
+    model = AuthorisedSignatory
+    form_class = AuthorisedSignatoryForm
+    template_name = 'trust/authorised_signatory_form.html'
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            AuthorisedSignatory.objects.select_related('trust_account'),
+            self.request.user,
+            firm_lookup='trust_account__firm',
+        )
+
+    def get_success_url(self):
+        messages.success(self.request, 'Authorised signatory updated.')
+        return reverse('trust:authorised_signatory_list')
 
 
 class DepositRecordListView(AdminOrAccountantMixin, ListView):
