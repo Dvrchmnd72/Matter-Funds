@@ -292,6 +292,70 @@ class ControlledMoneyMonthlyStatement(models.Model):
         return add_nsw_working_days(self.period_end, 15)
 
 
+class AuthorisedSignatory(models.Model):
+    ROLE_PRINCIPAL = 'principal'
+    ROLE_SOLICITOR = 'solicitor'
+    ROLE_EMPLOYEE = 'employee'
+    ROLE_CONSULTANT = 'consultant'
+    ROLE_OTHER = 'other'
+
+    ROLE_CHOICES = [
+        (ROLE_PRINCIPAL, 'Principal'),
+        (ROLE_SOLICITOR, 'Solicitor / legal practitioner associate'),
+        (ROLE_EMPLOYEE, 'Employee / associate'),
+        (ROLE_CONSULTANT, 'Consultant'),
+        (ROLE_OTHER, 'Other authorised associate'),
+    ]
+
+    trust_account = models.ForeignKey(
+        TrustAccount,
+        on_delete=models.CASCADE,
+        related_name='authorised_signatories',
+    )
+    name = models.CharField(max_length=255)
+    address = models.TextField(blank=True, default='')
+    email = models.EmailField(blank=True)
+    role = models.CharField(max_length=30, choices=ROLE_CHOICES)
+    practising_certificate_number = models.CharField(max_length=80, blank=True)
+
+    authorised_trust_cheques = models.BooleanField(default=False)
+    authorised_trust_efts = models.BooleanField(default=False)
+    authorised_controlled_money = models.BooleanField(default=False)
+
+    authorised_from = models.DateField()
+    authorised_to = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+
+    notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Authorised Signatory'
+        verbose_name_plural = 'Authorised Signatories'
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['trust_account', 'is_active']),
+            models.Index(fields=['authorised_from']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} - {self.trust_account}"
+
+    def clean(self):
+        errors = {}
+        if self.authorised_to and self.authorised_from and self.authorised_to < self.authorised_from:
+            errors['authorised_to'] = 'Authorised to date cannot be before authorised from date.'
+        if not any([
+            self.authorised_trust_cheques,
+            self.authorised_trust_efts,
+            self.authorised_controlled_money,
+        ]):
+            errors['authorised_trust_cheques'] = 'Select at least one authorisation type.'
+        if errors:
+            raise ValidationError(errors)
+
+
+
 class MatterLedger(models.Model):
     matter = models.ForeignKey('matters.Matter', on_delete=models.PROTECT, related_name='ledgers')
     trust_account = models.ForeignKey(TrustAccount, on_delete=models.PROTECT, related_name='ledgers')
