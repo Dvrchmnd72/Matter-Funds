@@ -29,6 +29,12 @@ class Matter(models.Model):
         default='Principal Place of Practice',
         help_text='Location of regulated property for the matter.'
     )
+    other_party = models.CharField(
+        max_length=255,
+        blank=True,
+        default='',
+        help_text='Other party or counterparty for register-of-files-opened purposes.'
+    )
     opened_on = models.DateField(default=datetime.date.today)
     closed_on = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
