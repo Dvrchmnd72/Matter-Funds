@@ -353,12 +353,19 @@ def payments_cash_book_pdf_bytes(trust_account, date_from, date_to):
         if payment and payment.payment_method == "eft" and (payment.payee_bsb or payment.payee_account):
             payee_bsb_account = f"{payment.payee_bsb or ''} / {payment.payee_account or ''}"
 
+        matter = txn.matter_ledger.matter
+        matter_details = (
+            f"{getattr(matter.client, 'name', '')}\n"
+            f"Ref: {matter.file_number or matter.pk}\n"
+            f"{matter.description}"
+        )
+
         rows.append([
             str(txn.date_received_or_paid),
             txn.get_transaction_type_display(),
             _payment_reference(payment),
             payment.cheque_number if payment and payment.cheque_number else "",
-            str(txn.matter_ledger.matter),
+            matter_details,
             payment.payee_name if payment else "",
             payee_bsb_account,
             payment.get_payment_method_display() if payment else "",
