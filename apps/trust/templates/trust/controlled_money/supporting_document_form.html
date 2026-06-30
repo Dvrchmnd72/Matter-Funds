@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% load crispy_forms_tags %}
+{% block content %}
+<h1>Upload Controlled Money Supporting Document</h1>
+<p><strong>{{ controlled_money_account.account_name }}</strong></p>
+
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  {{ form|crispy }}
+  <button class="btn btn-primary">Upload</button>
+  <a class="btn btn-secondary" href="{% url 'trust:controlled_money_detail' controlled_money_account.pk %}">Cancel</a>
+</form>
+{% endblock %}

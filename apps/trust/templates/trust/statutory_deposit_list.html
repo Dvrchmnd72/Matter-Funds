@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Statutory Deposits – Matter Funds{% endblock %}
+{% block content %}
+<h1>Statutory Deposit Register</h1>
+
+<div class="alert alert-info">
+  Record statutory deposit reviews, supporting documents and adjustments. Calculations should be completed using authorised ADI statement balances and, where appropriate, the Law Society statutory deposit calculator.
+</div>
+
+<div class="mb-3">
+  <a href="{% url 'trust:statutory_deposit_create' %}" class="btn btn-primary">New Statutory Deposit Record</a>
+  <a href="{% url 'trust:statutory_deposit_pdf' %}" class="btn btn-outline-secondary">Export PDF</a>
+  <a href="https://www.lawsociety.com.au/practising-law-in-NSW/trust-money-and-fidelity-fund/statutory-deposits/calculator" target="_blank" class="btn btn-outline-info">Law Society Calculator</a>
+</div>
+
+<table class="table table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Trust Account</th>
+      <th>ADI</th>
+      <th>ADI</th>
+      <th>Period End</th>
+      <th>Required</th>
+      <th>Currently Held</th>
+      <th>Adjustment</th>
+      <th>Due</th>
+      <th>Made</th>
+      <th>Next Review</th>
+      <th>Status</th>
+      <th>Status</th>
+      <th>Documents</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for r in records %}
+    <tr>
+      <td>{{ r.trust_account }}</td>
+      <td>{{ r.statutory_deposit_adi|default:'—' }}</td>
+      <td>{{ r.statutory_deposit_adi|default:'—' }}</td>
+      <td>{{ r.applicable_period_end }}</td>
+      <td>${{ r.required_amount }}</td>
+      <td>${{ r.amount_currently_held }}</td>
+      <td>${{ r.adjustment_required }}</td>
+      <td>{{ r.adjustment_due_date|default:"—" }}</td>
+      <td>{{ r.adjustment_made_on|default:"—" }}</td>
+      <td>{{ r.next_review_due_on|default:"—" }}</td>
+      
+<td>
+{% if r.adjustment_required and r.adjustment_required != 0 %}
+<span class="badge bg-warning text-dark">Adjustment Required</span>
+{% elif r.next_review_due_on and r.next_review_due_on < today %}
+<span class="badge bg-danger">Review Due</span>
+{% else %}
+<span class="badge bg-success">Up to Date</span>
+{% endif %}
+</td>
+
+<td>
+        {% if r.status_label == 'Adjustment Required' %}
+          <span class="badge bg-warning text-dark">Adjustment Required</span>
+        {% elif r.status_label == 'Review Due' %}
+          <span class="badge bg-danger">Review Due</span>
+        {% else %}
+          <span class="badge bg-success">Up to Date</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if r.supporting_document %}<a href="{{ r.supporting_document.url }}" target="_blank">Support</a>{% endif %}
+        {% if r.law_society_determination_document %}<a href="{{ r.law_society_determination_document.url }}" target="_blank">Determination</a>{% endif %}
+        {% if not r.supporting_document and not r.law_society_determination_document %}—{% endif %}
+      </td>
+      <td><a href="{% url 'trust:statutory_deposit_update' r.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="12">No statutory deposit records yet.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

@@ -30,6 +30,19 @@ from .models import TrustTransaction, MatterLedger, MonthlyReconciliation, Irreg
 FOOTER_TEXT = "Prepared from Matter Funds \u2014 refer to LPUGR Part 4.2"
 
 
+def _payment_reference(payment):
+    if not payment:
+        return ""
+    display_ref = getattr(payment, "display_payment_reference", None)
+    if display_ref:
+        return display_ref() if callable(display_ref) else display_ref
+    for field in ("payment_number", "eft_reference", "cheque_number", "transaction_number"):
+        value = getattr(payment, field, None)
+        if value:
+            return str(value)
+    return f"Payment #{payment.pk}"
+
+
 def _build_header_info(trust_account):
     firm = trust_account.firm
     account_name = getattr(trust_account, "name", None) or getattr(trust_account, "account_name", "")
@@ -308,7 +321,7 @@ def payments_cash_book_pdf_bytes(trust_account, date_from, date_to):
             rows.append([
                 str(txn.date_received_or_paid),
                 "Payment reversal",
-                payment.display_payment_reference if payment else f"Transaction #{original.pk}",
+                _payment_reference(payment) if payment else f"Transaction #{original.pk}",
                 payment.cheque_number if payment and payment.cheque_number else "",
                 str(txn.matter_ledger.matter),
                 payment.payee_name if payment else "",
@@ -332,7 +345,7 @@ def payments_cash_book_pdf_bytes(trust_account, date_from, date_to):
         rows.append([
             str(txn.date_received_or_paid),
             txn.get_transaction_type_display(),
-            payment.display_payment_reference if payment else "",
+            _payment_reference(payment),
             payment.cheque_number if payment and payment.cheque_number else "",
             str(txn.matter_ledger.matter),
             payment.payee_name if payment else "",
@@ -1406,7 +1419,23 @@ def receipt_pdf(receipt):
 import hashlib
 import json
 from django.core.files.base import ContentFile
-from .models import ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ControlledMoneySupportingDocument, TrustMonthlyRecord, TrustAccountingPeriod
+from .models import (
+    ControlledMoneyAccount,
+    ControlledMoneyReceipt,
+    ControlledMoneyWithdrawal,
+    ControlledMoneyMonthlyStatement,
+    ControlledMoneySupportingDocument,
+    TrustMonthlyRecord,
+    TrustAccountingPeriod,
+    TrustInvestment,
+    StatutoryDepositRecord,
+    AuthorisedSignatory,
+    WrittenDirection,
+    TransitMoneyEntry,
+    PowerMoneyEntry,
+    PowerMoneyDealing,
+    AnnualTrustComplianceRecord,
+)
 
 
 def _date_range_for_ledger(matter_ledger, date_from=None, date_to=None):
@@ -1567,6 +1596,193 @@ def trust_records_export_pack_zip(trust_account, date_from=None, date_to=None, y
                     "controlled-money-evidence",
                 )
 
+        investments = list(
+            TrustInvestment.objects
+            .filter(Q(matter__firm=trust_account.firm) | Q(client__firm=trust_account.firm))
+            .filter(date_invested__range=(date_from, date_to))
+            .values(
+                'id', 'client_id', 'matter_id', 'person_on_behalf', 'person_address',
+                'investment_held_name', 'institution', 'investment_type', 'investment_particulars',
+                'amount_invested', 'date_invested', 'maturity_due_on', 'source_of_investment',
+                'source_reference', 'trust_ledger_reference', 'written_direction_reference',
+                'written_direction_date', 'cheque_or_eft_reference', 'investment_terms',
+                'document_identifier', 'evidence_document', 'written_direction_document',
+                'interest_details', 'maturity_repayment_details', 'repaid_on', 'notes', 'created_at'
+            )
+        )
+        csv_export(
+            zf,
+            'investments/exports/trust_investments.csv',
+            investments,
+            [
+                'id', 'client_id', 'matter_id', 'person_on_behalf', 'person_address',
+                'investment_held_name', 'institution', 'investment_type', 'investment_particulars',
+                'amount_invested', 'date_invested', 'maturity_due_on', 'source_of_investment',
+                'source_reference', 'trust_ledger_reference', 'written_direction_reference',
+                'written_direction_date', 'cheque_or_eft_reference', 'investment_terms',
+                'document_identifier', 'evidence_document', 'written_direction_document',
+                'interest_details', 'maturity_repayment_details', 'repaid_on', 'notes', 'created_at'
+            ],
+        )
+
+        statutory_deposits = list(
+            StatutoryDepositRecord.objects
+            .filter(trust_account=trust_account, applicable_period_end__range=(date_from, date_to))
+            .values(
+                'id', 'trust_account_id', 'applicable_period_end', 'statutory_deposit_adi',
+                'statutory_deposit_account_reference', 'calculated_on', 'required_amount',
+                'amount_currently_held', 'adjustment_required', 'adjustment_due_date',
+                'adjustment_made_on', 'calculation_notes', 'supporting_document',
+                'law_society_determination_document', 'next_review_due_on',
+                'reviewed_by_id', 'reviewed_on', 'created_at'
+            )
+        )
+        csv_export(
+            zf,
+            'statutory-deposits/exports/statutory_deposits.csv',
+            statutory_deposits,
+            [
+                'id', 'trust_account_id', 'applicable_period_end', 'statutory_deposit_adi',
+                'statutory_deposit_account_reference', 'calculated_on', 'required_amount',
+                'amount_currently_held', 'adjustment_required', 'adjustment_due_date',
+                'adjustment_made_on', 'calculation_notes', 'supporting_document',
+                'law_society_determination_document', 'next_review_due_on',
+                'reviewed_by_id', 'reviewed_on', 'created_at'
+            ],
+        )
+
+        authorised_signatories = list(
+            AuthorisedSignatory.objects
+            .filter(trust_account=trust_account)
+            .values(
+                'id', 'trust_account_id', 'name', 'address', 'email', 'role',
+                'practising_certificate_number', 'authorised_trust_cheques',
+                'authorised_trust_efts', 'authorised_controlled_money',
+                'authorised_from', 'authorised_to', 'is_active', 'notes',
+                'last_reviewed_on', 'next_review_due_on', 'reviewed_by_id',
+                'reviewed_on', 'review_notes', 'created_at'
+            )
+        )
+        csv_export(
+            zf,
+            'authorised-signatories/exports/authorised_signatories.csv',
+            authorised_signatories,
+            [
+                'id', 'trust_account_id', 'name', 'address', 'email', 'role',
+                'practising_certificate_number', 'authorised_trust_cheques',
+                'authorised_trust_efts', 'authorised_controlled_money',
+                'authorised_from', 'authorised_to', 'is_active', 'notes',
+                'last_reviewed_on', 'next_review_due_on', 'reviewed_by_id',
+                'reviewed_on', 'review_notes', 'created_at'
+            ],
+        )
+
+        written_directions = list(
+            WrittenDirection.objects
+            .filter(Q(matter__firm=trust_account.firm) | Q(client__firm=trust_account.firm))
+            .filter(signed_on__range=(date_from, date_to))
+            .values('id', 'client_id', 'matter_id', 'direction_text', 'signed_on', 'document', 'linked_transaction_id', 'created_at')
+        )
+        csv_export(
+            zf,
+            'written-directions/exports/written_directions.csv',
+            written_directions,
+            ['id', 'client_id', 'matter_id', 'direction_text', 'signed_on', 'document', 'linked_transaction_id', 'created_at'],
+        )
+
+        transit_money = list(
+            TransitMoneyEntry.objects
+            .filter(Q(matter__firm=trust_account.firm) | Q(client__firm=trust_account.firm))
+            .filter(received_on__range=(date_from, date_to))
+            .values(
+                'id', 'client_id', 'matter_id', 'received_on', 'payor', 'amount',
+                'to_be_paid_to', 'paid_on', 'purpose', 'instructions_document',
+                'supporting_document', 'notes'
+            )
+        )
+        csv_export(
+            zf,
+            'transit-money/exports/transit_money.csv',
+            transit_money,
+            [
+                'id', 'client_id', 'matter_id', 'received_on', 'payor', 'amount',
+                'to_be_paid_to', 'paid_on', 'purpose', 'instructions_document',
+                'supporting_document', 'notes'
+            ],
+        )
+
+        power_entries = list(
+            PowerMoneyEntry.objects
+            .filter(Q(matter__firm=trust_account.firm) | Q(client__firm=trust_account.firm))
+            .values(
+                'id', 'entry_type', 'client_id', 'matter_id', 'power_instrument',
+                'authority_document', 'donor', 'donor_address', 'donee', 'power_date',
+                'deceased_name', 'date_of_death', 'matter_reference', 'description',
+                'responsible_solicitor', 'amount_held', 'notes'
+            )
+        )
+        csv_export(
+            zf,
+            'power-money/exports/power_money_entries.csv',
+            power_entries,
+            [
+                'id', 'entry_type', 'client_id', 'matter_id', 'power_instrument',
+                'authority_document', 'donor', 'donor_address', 'donee', 'power_date',
+                'deceased_name', 'date_of_death', 'matter_reference', 'description',
+                'responsible_solicitor', 'amount_held', 'notes'
+            ],
+        )
+
+        power_dealings = list(
+            PowerMoneyDealing.objects
+            .filter(Q(power_entry__matter__firm=trust_account.firm) | Q(power_entry__client__firm=trust_account.firm))
+            .filter(dealing_date__range=(date_from, date_to))
+            .values(
+                'id', 'power_entry_id', 'dealing_date', 'description', 'deposit',
+                'withdrawal', 'payee_or_source', 'supporting_document', 'notes'
+            )
+        )
+        csv_export(
+            zf,
+            'power-money/exports/power_money_dealings.csv',
+            power_dealings,
+            [
+                'id', 'power_entry_id', 'dealing_date', 'description', 'deposit',
+                'withdrawal', 'payee_or_source', 'supporting_document', 'notes'
+            ],
+        )
+
+        annual_compliance = list(
+            AnnualTrustComplianceRecord.objects
+            .filter(firm=trust_account.firm)
+            .filter(trust_year_start__lte=date_to, trust_year_end__gte=date_from)
+            .values(
+                'id', 'firm_id', 'trust_year_start', 'trust_year_end', 'status',
+                'part_a_completed_on', 'part_b_required', 'part_b_completed_on',
+                'external_examiner_required', 'external_examiner_name',
+                'external_examiner_report_lodged_on', 'bank_reconciliation_31_march',
+                'trial_balance_31_march', 'bank_statement_31_march',
+                'overdrawn_ledgers_reviewed', 'controlled_money_listing_reviewed',
+                'investment_money_listing_reviewed', 'notes', 'reviewed_by_id',
+                'reviewed_on', 'created_at', 'updated_at'
+            )
+        )
+        csv_export(
+            zf,
+            'annual-compliance/exports/annual_compliance.csv',
+            annual_compliance,
+            [
+                'id', 'firm_id', 'trust_year_start', 'trust_year_end', 'status',
+                'part_a_completed_on', 'part_b_required', 'part_b_completed_on',
+                'external_examiner_required', 'external_examiner_name',
+                'external_examiner_report_lodged_on', 'bank_reconciliation_31_march',
+                'trial_balance_31_march', 'bank_statement_31_march',
+                'overdrawn_ledgers_reviewed', 'controlled_money_listing_reviewed',
+                'investment_money_listing_reviewed', 'notes', 'reviewed_by_id',
+                'reviewed_on', 'created_at', 'updated_at'
+            ],
+        )
+
         txns = list(TrustTransaction.objects.filter(matter_ledger__trust_account=trust_account, date_received_or_paid__range=(date_from, date_to)).values('id', 'transaction_type', 'amount', 'date_received_or_paid', 'description', 'matter_ledger_id'))
         csv_export(zf, 'exports/trust_transactions.csv', txns, ['id', 'transaction_type', 'amount', 'date_received_or_paid', 'description', 'matter_ledger_id'])
         ledgers = list(MatterLedger.objects.filter(trust_account=trust_account).values('id', 'matter_id', 'balance'))
@@ -1657,7 +1873,7 @@ def payment_pdf(payment):
         ["Expression", "Law Practice Trust Account"],
         ["Withdrawal type", txn.get_transaction_type_display()],
         ["Withdrawal method", payment.get_payment_method_display()],
-        ["Payment / EFT reference", payment.display_payment_reference],
+        ["Payment / EFT reference", _payment_reference(payment)],
         ["Date of cheque / EFT", str(txn.date_received_or_paid)],
         ["Amount ordered to be paid", f"${txn.amount}"],
         ["Pay to / payee", payment.payee_name],
@@ -1900,3 +2116,105 @@ def outstanding_cheques_pdf_bytes(trust_account, rows, totals):
         ['Payment', 'Cheque no.', 'Date issued', 'Matter', 'Payee', 'Amount', 'Days', 'Age band'],
     )
     return buffer.getvalue()
+
+
+def authorised_signatory_register_pdf(signatories):
+    buffer = io.BytesIO()
+    if not HAS_REPORTLAB:
+        raise ImportError("reportlab is required for PDF generation")
+
+    styles = getSampleStyleSheet()
+    title_style = styles["Heading1"]
+    normal = styles["Normal"].clone("authorised_signatory_cell")
+    normal.fontSize = 6
+    normal.leading = 7
+    header = styles["Normal"].clone("authorised_signatory_header")
+    header.fontName = "Helvetica-Bold"
+    header.fontSize = 6
+    header.leading = 7
+
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        leftMargin=1.0 * cm,
+        rightMargin=1.0 * cm,
+        topMargin=1.2 * cm,
+        bottomMargin=1.2 * cm,
+    )
+
+    generated_at = timezone.localtime(timezone.now()).strftime("%d %b %Y %I:%M %p %Z")
+
+    elements = [
+        Paragraph("Authorised Signatory Register", title_style),
+        Paragraph(f"Generated: {generated_at}", styles["Normal"]),
+        Spacer(1, 0.3 * cm),
+        Paragraph(
+            "Register of persons authorised to sign trust cheques, effect/direct/authorise trust EFT withdrawals, "
+            "or operate controlled money accounts.",
+            styles["Normal"],
+        ),
+        Spacer(1, 0.3 * cm),
+    ]
+
+    data = [[
+        Paragraph("Name", header),
+        Paragraph("Trust Account", header),
+        Paragraph("Role", header),
+        Paragraph("Practising Certificate", header),
+        Paragraph("Cheques", header),
+        Paragraph("EFTs", header),
+        Paragraph("Controlled Money", header),
+        Paragraph("Authorised From", header),
+        Paragraph("Authorised To", header),
+        Paragraph("Status", header),
+        Paragraph("Last Review", header),
+        Paragraph("Next Review", header),
+        Paragraph("Review Status", header),
+        Paragraph("Notes", header),
+    ]]
+
+    for s in signatories:
+        data.append([
+            Paragraph(s.name or "-", normal),
+            Paragraph(str(s.trust_account) or "-", normal),
+            Paragraph(s.get_role_display() or "-", normal),
+            Paragraph(s.practising_certificate_number or "-", normal),
+            Paragraph("Yes" if s.authorised_trust_cheques else "No", normal),
+            Paragraph("Yes" if s.authorised_trust_efts else "No", normal),
+            Paragraph("Yes" if s.authorised_controlled_money else "No", normal),
+            Paragraph(s.authorised_from.strftime("%d %b %Y") if s.authorised_from else "-", normal),
+            Paragraph(s.authorised_to.strftime("%d %b %Y") if s.authorised_to else "-", normal),
+            Paragraph("Active" if s.is_active else "Inactive", normal),
+            Paragraph(s.last_reviewed_on.strftime("%d %b %Y") if s.last_reviewed_on else "-", normal),
+            Paragraph(s.next_review_due_on.strftime("%d %b %Y") if s.next_review_due_on else "-", normal),
+            Paragraph(s.review_status, normal),
+            Paragraph((s.notes or s.review_notes or "-")[:300], normal),
+        ])
+
+    table = Table(
+        data,
+        colWidths=[
+            2.2 * cm, 3.4 * cm, 2.0 * cm, 2.0 * cm,
+            1.2 * cm, 1.2 * cm, 1.7 * cm,
+            1.7 * cm, 1.7 * cm, 1.4 * cm,
+            1.7 * cm, 1.7 * cm, 1.7 * cm, 3.2 * cm,
+        ],
+        repeatRows=1,
+    )
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.black),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("FONTSIZE", (0, 0), (-1, -1), 6),
+        ("PADDING", (0, 0), (-1, -1), 3),
+    ]))
+    elements.append(table)
+    elements.append(Spacer(1, 0.3 * cm))
+    elements.append(Paragraph(FOOTER_TEXT, styles["Italic"]))
+    doc.build(elements)
+
+    return _pdf_response_from_bytes(
+        "authorised_signatory_register.pdf",
+        buffer.getvalue(),
+    )

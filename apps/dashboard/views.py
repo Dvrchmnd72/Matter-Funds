@@ -4,6 +4,7 @@ from django.db.models import Q, Sum
 from django.views.generic import TemplateView
 
 from apps.matters.models import Matter
+from apps.trust.compliance import ComplianceService
 from apps.trust.models import TrustAccount, MatterLedger, MonthlyReconciliation, Irregularity
 
 
@@ -43,7 +44,9 @@ class DashboardView(LoginRequiredMixin, TemplateView):
             'open_matters': open_matters,
             'trust_accounts': trust_accounts,
             'total_balance': total_balance,
+            'total_trust_balance': total_balance,
             'unreconciled': unreconciled,
             'open_irregularities': open_irregularities,
+            'compliance_status': ComplianceService(getattr(user, 'firm', None)).get_status(),
         })
         return ctx

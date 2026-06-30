@@ -1,9 +1,12 @@
 from django.contrib import admin
 
+from .models import AnnualTrustComplianceRecord
 from .models import (
+    Section19ComplianceReview,
+    ComplianceReviewLog,
     TrustAccount, ControlledMoneyAccount, MatterLedger, TrustTransaction,
     Receipt, Payment, TrustJournal, WrittenDirection, TransitMoneyEntry,
-    PowerMoneyEntry, MonthlyReconciliation, Irregularity, TrustAccountingPeriod,
+    PowerMoneyEntry, TrustInvestment, MonthlyReconciliation, Irregularity, TrustAccountingPeriod,
     TrustMonthlyRecord, ControlledMoneyReceipt, ControlledMoneyWithdrawal,
     ControlledMoneySupportingDocument, ControlledMoneyMonthlyStatement,
 )
@@ -62,7 +65,7 @@ class TrustTransactionAdmin(admin.ModelAdmin):
     list_filter = ['transaction_type', 'is_reversed']
     search_fields = ['description']
     readonly_fields = ['transaction_type', 'matter_ledger', 'amount', 'date_received_or_paid',
-                       'date_banked', 'description', 'created_by', 'created_at', 'is_reversed', 'reverses']
+                       'date_banked', 'description', 'created_by', 'is_reversed', 'reverses']
 
     def has_add_permission(self, request):
         return False
@@ -163,12 +166,12 @@ class PaymentAdmin(_ReadOnlyAppendMixin, admin.ModelAdmin):
 class TrustJournalAdmin(_ReadOnlyAppendMixin, admin.ModelAdmin):
     list_display = ['from_ledger', 'to_ledger', 'amount', 'authority_date', 'created_by']
     search_fields = ['description', 'authority_signed_by']
-    readonly_fields = ['journal_out_txn', 'journal_in_txn', 'created_by', 'created_at']
+    readonly_fields = ['journal_out_txn', 'journal_in_txn', 'created_by']
 
 
 @admin.register(WrittenDirection)
 class WrittenDirectionAdmin(admin.ModelAdmin):
-    list_display = ['client', 'matter', 'signed_on', 'created_at']
+    list_display = ['client', 'matter', 'signed_on']
     list_filter = ['client']
     search_fields = ['client__name', 'direction_text']
 
@@ -177,6 +180,30 @@ class WrittenDirectionAdmin(admin.ModelAdmin):
 class TransitMoneyEntryAdmin(admin.ModelAdmin):
     list_display = ['payor', 'amount', 'to_be_paid_to', 'received_on', 'paid_on']
     search_fields = ['payor', 'to_be_paid_to']
+
+
+@admin.register(TrustInvestment)
+class TrustInvestmentAdmin(admin.ModelAdmin):
+    list_display = [
+        'person_on_behalf',
+        'investment_held_name',
+        'institution',
+        'amount_invested',
+        'date_invested',
+        'maturity_due_on',
+        'source_of_investment',
+        'repaid_on',
+    ]
+    list_filter = ['source_of_investment', 'date_invested', 'maturity_due_on', 'repaid_on']
+    search_fields = [
+        'person_on_behalf',
+        'investment_held_name',
+        'institution',
+        'investment_type',
+        'source_reference',
+        'trust_ledger_reference',
+        'document_identifier',
+    ]
 
 
 @admin.register(PowerMoneyEntry)
@@ -189,14 +216,14 @@ class PowerMoneyEntryAdmin(admin.ModelAdmin):
 class MonthlyReconciliationAdmin(_ReadOnlyAppendMixin, admin.ModelAdmin):
     list_display = ['trust_account', 'period_end', 'cash_book_balance', 'reconciled_balance', 'is_reconciled', 'is_finalised']
     list_filter = ['trust_account', 'is_reconciled', 'is_finalised']
-    readonly_fields = ['reconciled_balance', 'is_reconciled', 'is_finalised', 'finalised_by', 'finalised_on', 'created_at']
+    readonly_fields = ['reconciled_balance', 'is_reconciled', 'is_finalised', 'finalised_by', 'finalised_on']
 
 
 @admin.register(TrustAccountingPeriod)
 class TrustAccountingPeriodAdmin(admin.ModelAdmin):
     list_display = ['trust_account', 'period_start', 'period_end', 'status', 'locked_by', 'locked_on']
     list_filter = ['trust_account', 'status']
-    readonly_fields = ['created_at', 'updated_at', 'locked_by', 'locked_on']
+    readonly_fields = ['updated_at', 'locked_by', 'locked_on']
 
     def has_change_permission(self, request, obj=None):
         if obj and obj.status == TrustAccountingPeriod.STATUS_LOCKED:
@@ -231,3 +258,27 @@ class IrregularityAdmin(admin.ModelAdmin):
     list_display = ['trust_account', 'discovered_on', 'amount', 'reported_to_law_society_on']
     list_filter = ['trust_account']
     search_fields = ['description']
+
+
+@admin.register(ComplianceReviewLog)
+class ComplianceReviewLogAdmin(admin.ModelAdmin):
+    list_display = ['firm', 'severity', 'category', 'title', 'status', 'reviewed_by', 'reviewed_on', 'next_review_on']
+    list_filter = ['firm', 'severity', 'category', 'status', 'next_review_on']
+    search_fields = ['category', 'title', 'review_note', 'alert_key']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(Section19ComplianceReview)
+class Section19ComplianceReviewAdmin(admin.ModelAdmin):
+    list_display = ['firm', 'review_period_start', 'review_period_end', 'status', 'reviewed_by', 'reviewed_on']
+    list_filter = ['firm', 'status', 'review_period_end']
+    search_fields = ['corrective_action_summary']
+    readonly_fields = ['created_at', 'updated_at']
+
+
+@admin.register(AnnualTrustComplianceRecord)
+class AnnualTrustComplianceRecordAdmin(admin.ModelAdmin):
+    list_display = ['firm', 'trust_year_start', 'trust_year_end', 'status', 'part_a_completed_on', 'external_examiner_required', 'external_examiner_report_lodged_on']
+    list_filter = ['firm', 'status', 'trust_year_end', 'external_examiner_required']
+    search_fields = ['external_examiner_name', 'notes']
+    readonly_fields = ['created_at', 'updated_at']

@@ -1,45 +1,126 @@
 {% extends "base.html" %}
-{% block title %}Dashboard – Matter Funds{% endblock %}
+{% block title %}Home – Matter Funds{% endblock %}
+
 {% block content %}
-<h1 class="mb-4">Dashboard</h1>
+<div class="home-hero mb-4">
+  <div class="row align-items-center">
+    <div class="col-lg-8">
+      <h1 class="mb-2">Trust Overview</h1>
+      <p class="text-muted mb-3">Your trust balance, compliance position and review items at a glance.</p>
+
+      <div class="d-flex flex-wrap gap-2">
+        {% if compliance_status.overall == "Good" %}
+          <span class="badge bg-success">Trust compliance current</span>
+        {% elif compliance_status.overall == "Action Required" %}
+          <span class="badge bg-danger">Trust compliance action required</span>
+        {% elif compliance_status.overall == "Review Required" %}
+          <span class="badge bg-warning text-dark">Trust compliance review required</span>
+        {% else %}
+          <span class="badge bg-warning text-dark">Trust compliance reminder</span>
+        {% endif %}
+
+        {% if open_irregularities == 0 %}
+          <span class="badge bg-success">No open irregularities</span>
+        {% else %}
+          <span class="badge bg-danger">{{ open_irregularities }} open irregularities</span>
+        {% endif %}
+
+        {% if unreconciled == 0 %}
+          <span class="badge bg-success">Reconciliations current</span>
+        {% else %}
+          <span class="badge bg-warning text-dark">{{ unreconciled }} unreconciled months</span>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="col-lg-4 text-lg-end mt-3 mt-lg-0">
+      <div class="text-muted small">Current trust balance</div>
+      <div class="display-6 fw-bold">
+        {% if total_trust_balance %}${{ total_trust_balance|floatformat:2 }}{% else %}$0.00{% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="row g-4">
-  <div class="col-sm-6 col-lg-3">
-    <div class="card text-bg-primary h-100">
+  <div class="col-lg-6">
+    <div class="card shadow-sm border-0 h-100">
       <div class="card-body">
-        <h5 class="card-title">Open Matters</h5>
-        <p class="display-4">{{ open_matters }}</p>
+        <h5 class="card-title mb-3">Compliance Centre</h5>
+
+        <div class="list-group list-group-flush">
+          <a href="{% url 'trust:compliance_centre' %}" class="list-group-item list-group-item-action d-flex justify-content-between">
+            Overall trust compliance
+            <strong>
+              {% if compliance_status.overall == "Good" %}🟢 Good{% elif compliance_status.overall == "Action Required" %}🔴 Action Required{% elif compliance_status.overall == "Review Required" %}🟠 Review Required{% else %}🟡 Reminder{% endif %}
+            </strong>
+          </a>
+          <a href="{% url 'trust:compliance_centre' %}" class="list-group-item list-group-item-action d-flex justify-content-between">
+            Action required <span class="badge bg-danger">{{ compliance_status.action_count }}</span>
+          </a>
+          <a href="{% url 'trust:compliance_centre' %}" class="list-group-item list-group-item-action d-flex justify-content-between">
+            Reviews <span class="badge bg-warning text-dark">{{ compliance_status.review_count }}</span>
+          </a>
+          <a href="{% url 'trust:compliance_centre' %}" class="list-group-item list-group-item-action d-flex justify-content-between">
+            Reminders <span class="badge bg-secondary">{{ compliance_status.reminder_count }}</span>
+          </a>
+          <a href="/trust/irregularities/" class="list-group-item list-group-item-action d-flex justify-content-between">
+            Trust irregularities <span class="badge {% if open_irregularities > 0 %}bg-danger{% else %}bg-success{% endif %}">{{ open_irregularities }}</span>
+          </a>
+        </div>
       </div>
     </div>
   </div>
-  <div class="col-sm-6 col-lg-3">
-    <div class="card text-bg-success h-100">
+
+  <div class="col-lg-6">
+    <div class="card shadow-sm border-0 h-100">
       <div class="card-body">
-        <h5 class="card-title">Trust Accounts</h5>
-        <p class="display-4">{{ trust_accounts }}</p>
+        <h5 class="card-title mb-3">Quick Actions</h5>
+        <div class="row g-3">
+          <div class="col-md-6"><a href="/trust/accounts/" class="quick-action qa-green">🟢 Receipt</a></div>
+          <div class="col-md-6"><a href="/trust/accounts/" class="quick-action qa-blue">🔴 Payment</a></div>
+          <div class="col-md-6"><a href="/trust/accounts/" class="quick-action qa-orange">🟠 Transfer</a></div>
+          <div class="col-md-6"><a href="/trust/accounts/" class="quick-action qa-slate">📒 Matter Ledger</a></div>
+          <div class="col-md-6"><a href="/trust/controlled-money/" class="quick-action qa-purple">💼 Controlled Money</a></div>
+          <div class="col-md-6"><a href="/trust/reports/" class="quick-action qa-blue">📊 Reports</a></div>
+        </div>
       </div>
     </div>
   </div>
-  <div class="col-sm-6 col-lg-3">
-    <div class="card text-bg-info h-100">
+</div>
+
+<div class="row g-4 mt-1">
+  <div class="col-lg-6">
+    <div class="card shadow-sm border-0 h-100">
       <div class="card-body">
-        <h5 class="card-title">Total Trust Balance</h5>
-        <p class="display-6">${{ total_balance }}</p>
+        <h5 class="card-title mb-3">Trust Snapshot</h5>
+        <table class="table mb-0">
+          <tr><th>Open Matters</th><td>{{ open_matters }}</td></tr>
+          <tr><th>Current Trust Balance</th><td>{% if total_trust_balance %}${{ total_trust_balance|floatformat:2 }}{% else %}$0.00{% endif %}</td></tr>
+          <tr><th>Unreconciled Months</th><td>{{ unreconciled }}</td></tr>
+          <tr><th>Open Irregularities</th><td>{{ open_irregularities }}</td></tr>
+        </table>
       </div>
     </div>
   </div>
-  <div class="col-sm-6 col-lg-3">
-    <div class="card {% if unreconciled > 0 %}text-bg-warning{% else %}text-bg-secondary{% endif %} h-100">
+
+  <div class="col-lg-6">
+    <div class="card shadow-sm border-0 h-100">
       <div class="card-body">
-        <h5 class="card-title">Unreconciled Months</h5>
-        <p class="display-4">{{ unreconciled }}</p>
-      </div>
-    </div>
-  </div>
-  <div class="col-sm-6 col-lg-3">
-    <div class="card {% if open_irregularities > 0 %}text-bg-danger{% else %}text-bg-secondary{% endif %} h-100">
-      <div class="card-body">
-        <h5 class="card-title">Open Irregularities</h5>
-        <p class="display-4">{{ open_irregularities }}</p>
+        <h5 class="card-title mb-3">Records Overview</h5>
+        <div class="list-group list-group-flush">
+          <div class="list-group-item d-flex justify-content-between">
+            <span>Reconciliations current</span>
+            <strong>{% if unreconciled == 0 %}Yes{% else %}No{% endif %}</strong>
+          </div>
+          <div class="list-group-item d-flex justify-content-between">
+            <span>No open irregularities</span>
+            <strong>{% if open_irregularities == 0 %}Yes{% else %}No{% endif %}</strong>
+          </div>
+          <div class="list-group-item">
+            Examiner and trust-record packs are available under Reports.
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -11,22 +11,32 @@ from django.urls import reverse_lazy, reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.views import View
+from apps.trust.compliance import ComplianceService
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, TemplateView, FormView
 
 from apps.accounts.permissions import StaffRequiredMixin, AdminOrAccountantMixin
 from apps.trust import services
 from apps.trust import reports as trust_reports
 from .models import (
+    Section19ComplianceReview,
+    ComplianceReviewLog,
     TrustAccount, MatterLedger, TrustTransaction, Receipt, Payment, TrustJournal,
     MonthlyReconciliation, DepositRecord, ReconciliationBankLine, Irregularity, TrustAccountingPeriod, TrustMonthlyRecord,
-    ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, AuthorisedSignatory,
+    ControlledMoneyAccount, ControlledMoneyReceipt, ControlledMoneyWithdrawal, ControlledMoneyMonthlyStatement, ControlledMoneySupportingDocument, AuthorisedSignatory, WrittenDirection, TransitMoneyEntry, PowerMoneyEntry, PowerMoneyDealing, TrustInvestment, StatutoryDepositRecord,
+    UnclaimedMoneyRecord
 )
+from .models import AnnualTrustComplianceRecord
+from .forms import AnnualTrustComplianceRecordForm
 from .forms import (
+    Section19ComplianceReviewForm,
+    ComplianceReviewLogForm,
     TrustAccountUpdateForm, ReceiptForm, PaymentForm, TransferCostsToOfficeForm, TrustJournalForm, ReconciliationForm, DepositRecordForm,
     ManualIrregularityForm, IrregularityResolveForm, DateRangeForm, YearForm,
     ReconciliationFinaliseForm, AccountingPeriodLockForm, ReconciliationBankStatementForm, ReconciliationBankLineForm,
     ControlledMoneyAccountForm, ControlledMoneyReceiptForm, ControlledMoneyWithdrawalForm,
-    ControlledMoneyMonthlyStatementForm, ControlledMoneyPrincipalReviewForm, AuthorisedSignatoryForm,
+    ControlledMoneyMonthlyStatementForm, ControlledMoneyPrincipalReviewForm, ControlledMoneySupportingDocumentForm, AuthorisedSignatoryForm, WrittenDirectionForm, TransitMoneyEntryForm, PowerMoneyEntryForm, PowerMoneyDealingForm, TrustInvestmentForm, StatutoryDepositRecordForm,
+    AnnualTrustComplianceRecordForm,
+    UnclaimedMoneyRecordForm
 )
 
 
@@ -53,8 +63,8 @@ class TrustAccountListView(StaffRequiredMixin, ListView):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('firm'),
             self.request.user,
-            firm_lookup='firm',
-        )
+            firm_lookup='firm'
+)
 
 
 class TrustAccountDetailView(StaffRequiredMixin, DetailView):
@@ -66,8 +76,8 @@ class TrustAccountDetailView(StaffRequiredMixin, DetailView):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('firm'),
             self.request.user,
-            firm_lookup='firm',
-        )
+            firm_lookup='firm'
+)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -103,8 +113,8 @@ class TrustAccountDetailView(StaffRequiredMixin, DetailView):
                 'payment',
                 'reverses',
                 'journal_as_out',
-                'journal_as_in',
-            )
+                'journal_as_in'
+)
             .order_by('-created_at')[:20]
         )
         return ctx
@@ -120,8 +130,8 @@ class TrustAccountUpdateView(AdminOrAccountantMixin, UpdateView):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('firm'),
             self.request.user,
-            firm_lookup='firm',
-        )
+            firm_lookup='firm'
+)
 
     def get_success_url(self):
         return reverse('trust:account_detail', kwargs={'pk': self.object.pk})
@@ -137,8 +147,8 @@ class ReceiptCreateView(StaffRequiredMixin, View):
     def get_ledger(self):
         queryset = scope_trust_queryset_for_user(
             MatterLedger.objects.select_related('trust_account', 'matter'),
-            self.request.user,
-        )
+            self.request.user
+)
         return get_object_or_404(queryset, pk=self.kwargs['ledger_pk'])
 
     def get_context_data(self, form, ledger):
@@ -168,8 +178,8 @@ class ReceiptCreateView(StaffRequiredMixin, View):
                     payment_method=cd['payment_method'],
                     cheque_number=cd.get('cheque_number', ''),
                     purpose=cd['purpose'],
-                    created_by=request.user,
-                )
+                    created_by=request.user
+)
                 messages.success(request, f'Receipt #{receipt.receipt_number} created successfully.')
                 return redirect(reverse('trust:receipt_detail', kwargs={'pk': receipt.pk}))
             except (ValidationError, Exception) as e:
@@ -186,8 +196,8 @@ class ReceiptDetailView(StaffRequiredMixin, DetailView):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('transaction__matter_ledger__trust_account'),
             self.request.user,
-            firm_lookup='transaction__matter_ledger__trust_account__firm',
-        )
+            firm_lookup='transaction__matter_ledger__trust_account__firm'
+)
 
 
 class PaymentCreateView(StaffRequiredMixin, View):
@@ -196,8 +206,8 @@ class PaymentCreateView(StaffRequiredMixin, View):
     def get_ledger(self):
         queryset = scope_trust_queryset_for_user(
             MatterLedger.objects.select_related('trust_account', 'matter'),
-            self.request.user,
-        )
+            self.request.user
+)
         return get_object_or_404(queryset, pk=self.kwargs['ledger_pk'])
 
     def get(self, request, ledger_pk):
@@ -221,14 +231,13 @@ class PaymentCreateView(StaffRequiredMixin, View):
                     cheque_number=cd.get('cheque_number', ''),
                     purpose=cd['purpose'],
                     authorised_by=request.user,
-                    created_by=request.user,
-                )
+                    created_by=request.user
+)
                 messages.success(request, f'Payment #{payment.payment_number} created successfully.')
                 return redirect(reverse('trust:payment_detail', kwargs={'pk': payment.pk}))
             except (ValidationError, Exception) as e:
                 messages.error(request, str(e))
         return render(request, self.template_name, {'form': form, 'ledger': ledger})
-
 
 
 class PaymentDetailView(StaffRequiredMixin, DetailView):
@@ -241,11 +250,11 @@ class PaymentDetailView(StaffRequiredMixin, DetailView):
             super().get_queryset().select_related(
                 'transaction__matter_ledger__trust_account__firm',
                 'transaction__matter_ledger__matter__client',
-                'authorised_by',
-            ),
+                'authorised_by'
+),
             self.request.user,
-            firm_lookup='transaction__matter_ledger__trust_account__firm',
-        )
+            firm_lookup='transaction__matter_ledger__trust_account__firm'
+)
 
 
 class TransferCostsToOfficeCreateView(AdminOrAccountantMixin, View):
@@ -254,8 +263,8 @@ class TransferCostsToOfficeCreateView(AdminOrAccountantMixin, View):
     def get_ledger(self):
         queryset = scope_trust_queryset_for_user(
             MatterLedger.objects.select_related('trust_account', 'matter'),
-            self.request.user,
-        )
+            self.request.user
+)
         return get_object_or_404(queryset, pk=self.kwargs['ledger_pk'])
 
     def get(self, request, ledger_pk):
@@ -286,8 +295,8 @@ class TransferCostsToOfficeCreateView(AdminOrAccountantMixin, View):
                     notice_or_request_file=cd.get('notice_or_request_file'),
                     authority_or_agreement_file=cd.get('authority_or_agreement_file'),
                     reimbursement_evidence_file=cd.get('reimbursement_evidence_file'),
-                    costs_withdrawal_notes=cd.get('costs_withdrawal_notes', ''),
-                )
+                    costs_withdrawal_notes=cd.get('costs_withdrawal_notes', '')
+)
                 messages.success(request, f'Transfer to office #{payment.payment_number} created successfully.')
                 return redirect(reverse('trust:payment_detail', kwargs={'pk': payment.pk}))
             except (ValidationError, Exception) as e:
@@ -304,8 +313,8 @@ class TrustJournalCreateView(AdminOrAccountantMixin, View):
             queryset = scope_trust_queryset_for_user(
                 TrustAccount.objects.all(),
                 self.request.user,
-                firm_lookup='firm',
-            )
+                firm_lookup='firm'
+)
             return get_object_or_404(queryset, pk=ta_pk)
         return None
 
@@ -315,8 +324,8 @@ class TrustJournalCreateView(AdminOrAccountantMixin, View):
         accounts = scope_trust_queryset_for_user(
             TrustAccount.objects.filter(is_active=True),
             request.user,
-            firm_lookup='firm',
-        )
+            firm_lookup='firm'
+)
         return render(request, self.template_name, {'form': form, 'accounts': accounts, 'trust_account': trust_account})
 
     def post(self, request):
@@ -325,8 +334,8 @@ class TrustJournalCreateView(AdminOrAccountantMixin, View):
         accounts = scope_trust_queryset_for_user(
             TrustAccount.objects.filter(is_active=True),
             request.user,
-            firm_lookup='firm',
-        )
+            firm_lookup='firm'
+)
         if form.is_valid():
             cd = form.cleaned_data
             try:
@@ -338,8 +347,8 @@ class TrustJournalCreateView(AdminOrAccountantMixin, View):
                     written_authority_file=cd['written_authority'],
                     authority_date=cd['authority_date'],
                     authority_signed_by=cd['authority_signed_by'],
-                    created_by=request.user,
-                )
+                    created_by=request.user
+)
                 messages.success(request, f'Journal #{journal.pk} created successfully.')
                 if trust_account:
                     return redirect(reverse('trust:account_detail', kwargs={'pk': trust_account.pk}))
@@ -354,8 +363,8 @@ class ReverseTransactionView(AdminOrAccountantMixin, View):
         queryset = scope_trust_queryset_for_user(
             TrustTransaction.objects.select_related('matter_ledger__trust_account'),
             request.user,
-            firm_lookup='matter_ledger__trust_account__firm',
-        )
+            firm_lookup='matter_ledger__trust_account__firm'
+)
         txn = get_object_or_404(queryset, pk=pk)
         reason = request.POST.get('reason', 'Manual reversal')
         try:
@@ -376,8 +385,8 @@ class AuthorisedSignatoryListView(AdminOrAccountantMixin, ListView):
         queryset = scope_trust_queryset_for_user(
             AuthorisedSignatory.objects.select_related('trust_account'),
             self.request.user,
-            firm_lookup='trust_account__firm',
-        )
+            firm_lookup='trust_account__firm'
+)
         status = self.request.GET.get('status', 'active')
         if status == 'active':
             queryset = queryset.filter(is_active=True)
@@ -390,11 +399,24 @@ class AuthorisedSignatoryListView(AdminOrAccountantMixin, ListView):
         scoped = scope_trust_queryset_for_user(
             AuthorisedSignatory.objects.all(),
             self.request.user,
-            firm_lookup='trust_account__firm',
-        )
+            firm_lookup='trust_account__firm'
+)
         ctx['active_count'] = scoped.filter(is_active=True).count()
         ctx['status_filter'] = self.request.GET.get('status', 'active')
         return ctx
+
+
+class AuthorisedSignatoryPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, *args, **kwargs):
+        signatories = (
+            scope_trust_queryset_for_user(
+                AuthorisedSignatory.objects.select_related('trust_account'),
+                request.user,
+                firm_lookup='trust_account__firm'
+)
+            .order_by('trust_account__name', '-is_active', 'name')
+        )
+        return trust_reports.authorised_signatory_register_pdf(signatories)
 
 
 class AuthorisedSignatoryCreateView(AdminOrAccountantMixin, CreateView):
@@ -424,12 +446,713 @@ class AuthorisedSignatoryUpdateView(AdminOrAccountantMixin, UpdateView):
         return scope_trust_queryset_for_user(
             AuthorisedSignatory.objects.select_related('trust_account'),
             self.request.user,
-            firm_lookup='trust_account__firm',
-        )
+            firm_lookup='trust_account__firm'
+)
 
     def get_success_url(self):
         messages.success(self.request, 'Authorised signatory updated.')
         return reverse('trust:authorised_signatory_list')
+
+
+class StatutoryDepositListView(AdminOrAccountantMixin, ListView):
+    model = StatutoryDepositRecord
+    template_name = 'trust/statutory_deposit_list.html'
+    context_object_name = 'records'
+
+    def get_queryset(self):
+        qs = StatutoryDepositRecord.objects.select_related('trust_account')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(trust_account__firm=self.request.user.firm)
+        return qs.order_by('-applicable_period_end', 'trust_account__name')
+
+
+class StatutoryDepositCreateView(AdminOrAccountantMixin, CreateView):
+    model = StatutoryDepositRecord
+    form_class = StatutoryDepositRecordForm
+    template_name = 'trust/statutory_deposit_form.html'
+
+    def get_success_url(self):
+        messages.success(self.request, 'Statutory deposit record created.')
+        return reverse('trust:statutory_deposit_list')
+
+
+class StatutoryDepositUpdateView(AdminOrAccountantMixin, UpdateView):
+    model = StatutoryDepositRecord
+    form_class = StatutoryDepositRecordForm
+    template_name = 'trust/statutory_deposit_form.html'
+
+    def get_queryset(self):
+        qs = StatutoryDepositRecord.objects.select_related('trust_account')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(trust_account__firm=self.request.user.firm)
+        return qs
+
+    def get_success_url(self):
+        messages.success(self.request, 'Statutory deposit record updated.')
+        return reverse('trust:statutory_deposit_list')
+
+
+class StatutoryDepositPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, *args, **kwargs):
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+        qs = StatutoryDepositRecord.objects.select_related('trust_account')
+        if hasattr(request.user, 'firm') and request.user.firm_id:
+            qs = qs.filter(trust_account__firm=request.user.firm)
+        qs = qs.order_by('-applicable_period_end', 'trust_account__name')
+
+        buffer = io.BytesIO()
+        styles = getSampleStyleSheet()
+        normal = styles['Normal'].clone('sd_cell')
+        normal.fontSize = 7
+        normal.leading = 8
+        header = styles['Normal'].clone('sd_header')
+        header.fontName = 'Helvetica-Bold'
+        header.fontSize = 7
+        header.leading = 8
+
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=1*cm, rightMargin=1*cm, topMargin=1.2*cm, bottomMargin=1.2*cm)
+        generated_at = timezone.localtime(timezone.now()).strftime('%d %b %Y %I:%M %p %Z')
+
+        elements = [
+            Paragraph('Statutory Deposit Register', styles['Heading1']),
+            Paragraph(f'Generated: {generated_at}', styles['Normal']),
+            Spacer(1, 0.25*cm),
+            Paragraph('Record of statutory deposit reviews and supporting documents. Calculations should be checked against authorised ADI statement balances and the Law Society statutory deposit calculator.', styles['Normal']),
+            Spacer(1, 0.25*cm),
+        ]
+
+        data = [[
+            Paragraph('Trust Account', header),
+            Paragraph('Period End', header),
+            Paragraph('ADI / Account Ref', header),
+            Paragraph('Calculated', header),
+            Paragraph('Required', header),
+            Paragraph('Currently Held', header),
+            Paragraph('Adjustment', header),
+            Paragraph('Due', header),
+            Paragraph('Made', header),
+            Paragraph('Next Review', header),
+            Paragraph('Reviewed', header),
+            Paragraph('Docs', header),
+        ]]
+
+        for r in qs:
+            docs = []
+            if r.supporting_document:
+                docs.append('support')
+            if r.law_society_determination_document:
+                docs.append('determination')
+            data.append([
+                Paragraph(str(r.trust_account), normal),
+                Paragraph(str(r.applicable_period_end), normal),
+                Paragraph(f'{r.statutory_deposit_adi or "-"} {r.statutory_deposit_account_reference or ""}', normal),
+                Paragraph(str(r.calculated_on) if r.calculated_on else '-', normal),
+                Paragraph(f'${r.required_amount}', normal),
+                Paragraph(f'${r.amount_currently_held}', normal),
+                Paragraph(f'${r.adjustment_required}', normal),
+                Paragraph(str(r.adjustment_due_date) if r.adjustment_due_date else '-', normal),
+                Paragraph(str(r.adjustment_made_on) if r.adjustment_made_on else '-', normal),
+                Paragraph(str(r.next_review_due_on) if r.next_review_due_on else '-', normal),
+                Paragraph(str(r.reviewed_on) if r.reviewed_on else '-', normal),
+                Paragraph(', '.join(docs) if docs else '-', normal),
+            ])
+
+        if len(data) == 1:
+            data.append([Paragraph('-', normal)] * 11)
+
+        table = Table(data, colWidths=[3.5*cm, 1.8*cm, 3.5*cm, 1.8*cm, 1.8*cm, 2.0*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.8*cm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('PADDING', (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 0.25*cm))
+        elements.append(Paragraph('Statutory Deposit Register - generated by Matter Funds.', styles['Normal']))
+        doc.build(elements)
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="statutory_deposit_register.pdf"'
+        return response
+
+
+class TrustInvestmentListView(AdminOrAccountantMixin, ListView):
+    model = TrustInvestment
+    template_name = 'trust/investment_list.html'
+    context_object_name = 'investments'
+
+    def get_queryset(self):
+        qs = TrustInvestment.objects.select_related('client', 'matter')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=self.request.user.firm) | Q(matter__isnull=True))
+        return qs.order_by('-date_invested', 'person_on_behalf')
+
+
+class TrustInvestmentCreateView(AdminOrAccountantMixin, CreateView):
+    model = TrustInvestment
+    form_class = TrustInvestmentForm
+    template_name = 'trust/investment_form.html'
+
+    def get_success_url(self):
+        messages.success(self.request, 'Trust investment record created.')
+        return reverse('trust:investment_list')
+
+
+class TrustInvestmentUpdateView(AdminOrAccountantMixin, UpdateView):
+    model = TrustInvestment
+    form_class = TrustInvestmentForm
+    template_name = 'trust/investment_form.html'
+
+    def get_queryset(self):
+        qs = TrustInvestment.objects.select_related('client', 'matter')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=self.request.user.firm) | Q(matter__isnull=True))
+        return qs
+
+    def get_success_url(self):
+        messages.success(self.request, 'Trust investment record updated.')
+        return reverse('trust:investment_list')
+
+
+class TrustInvestmentDetailView(AdminOrAccountantMixin, DetailView):
+    model = TrustInvestment
+    template_name = 'trust/investment_detail.html'
+    context_object_name = 'investment'
+
+    def get_queryset(self):
+        qs = TrustInvestment.objects.select_related('client', 'matter')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=self.request.user.firm) | Q(matter__isnull=True))
+        return qs
+
+
+class TrustInvestmentPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, *args, **kwargs):
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+        qs = TrustInvestment.objects.select_related('client', 'matter')
+        if hasattr(request.user, 'firm') and request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=request.user.firm) | Q(matter__isnull=True))
+        qs = qs.order_by('-date_invested', 'person_on_behalf')
+
+        buffer = io.BytesIO()
+        styles = getSampleStyleSheet()
+        normal = styles['Normal'].clone('investment_cell')
+        normal.fontSize = 6
+        normal.leading = 7
+        header = styles['Normal'].clone('investment_header')
+        header.fontName = 'Helvetica-Bold'
+        header.fontSize = 6
+        header.leading = 7
+
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=0.8*cm, rightMargin=0.8*cm, topMargin=1.0*cm, bottomMargin=1.0*cm)
+        generated_at = timezone.localtime(timezone.now()).strftime('%d %b %Y %I:%M %p %Z')
+
+        elements = [
+            Paragraph('Register of Investments of Trust Money', styles['Heading1']),
+            Paragraph(f'Generated: {generated_at}', styles['Normal']),
+            Spacer(1, 0.25*cm),
+        ]
+
+        data = [[
+            Paragraph('Person', header),
+            Paragraph('Address', header),
+            Paragraph('Matter', header),
+            Paragraph('Name Investment Held In', header),
+            Paragraph('Institution', header),
+            Paragraph('Investment', header),
+            Paragraph('Amount', header),
+            Paragraph('Date', header),
+            Paragraph('Source', header),
+            Paragraph('Instruction', header),
+            Paragraph('Evidence', header),
+            Paragraph('Interest / Repayment', header),
+        ]]
+
+        for i in qs:
+            data.append([
+                Paragraph(i.person_on_behalf or '-', normal),
+                Paragraph(i.person_address or '-', normal),
+                Paragraph(str(i.matter or '-'), normal),
+                Paragraph(i.investment_held_name or '-', normal),
+                Paragraph(i.institution or '-', normal),
+                Paragraph((i.investment_type or i.investment_particulars or '-')[:250], normal),
+                Paragraph(f'${i.amount_invested}', normal),
+                Paragraph(str(i.date_invested), normal),
+                Paragraph(f'{i.get_source_of_investment_display()} {i.source_reference or ""}', normal),
+                Paragraph(i.written_direction_reference or ('Attached' if i.written_direction_document else '-'), normal),
+                Paragraph(i.document_identifier or ('Attached' if i.evidence_document else '-'), normal),
+                Paragraph((i.interest_details or i.maturity_repayment_details or '-')[:250], normal),
+            ])
+
+        if len(data) == 1:
+            data.append([Paragraph('-', normal)] * 12)
+
+        table = Table(data, colWidths=[2.3*cm, 2.8*cm, 2.8*cm, 2.7*cm, 2.5*cm, 3.0*cm, 1.5*cm, 1.5*cm, 2.7*cm, 2.1*cm, 1.8*cm, 3.0*cm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('PADDING', (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(table)
+        elements.append(Spacer(1, 0.25*cm))
+        elements.append(Paragraph('Register of Investments of Trust Money — generated by Matter Funds.', styles['Normal']))
+        doc.build(elements)
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="trust_investments_register.pdf"'
+        return response
+
+
+class PowerMoneyEntryListView(AdminOrAccountantMixin, ListView):
+    model = PowerMoneyEntry
+    template_name = 'trust/power_money_list.html'
+    context_object_name = 'power_entries'
+
+    def get_queryset(self):
+        qs = PowerMoneyEntry.objects.select_related('client', 'matter')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=self.request.user.firm) | Q(matter__isnull=True))
+        return qs.order_by('-power_date', 'donor', 'deceased_name')
+
+
+class PowerMoneyEntryCreateView(AdminOrAccountantMixin, CreateView):
+    model = PowerMoneyEntry
+    form_class = PowerMoneyEntryForm
+    template_name = 'trust/power_money_form.html'
+
+    def get_success_url(self):
+        messages.success(self.request, 'Power / estate register entry created.')
+        return reverse('trust:power_money_list')
+
+
+class PowerMoneyEntryUpdateView(AdminOrAccountantMixin, UpdateView):
+    model = PowerMoneyEntry
+    form_class = PowerMoneyEntryForm
+    template_name = 'trust/power_money_form.html'
+
+    def get_queryset(self):
+        qs = PowerMoneyEntry.objects.select_related('client', 'matter')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=self.request.user.firm) | Q(matter__isnull=True))
+        return qs
+
+    def get_success_url(self):
+        messages.success(self.request, 'Power / estate register entry updated.')
+        return reverse('trust:power_money_list')
+
+
+class PowerMoneyEntryDetailView(AdminOrAccountantMixin, DetailView):
+    model = PowerMoneyEntry
+    template_name = 'trust/power_money_detail.html'
+    context_object_name = 'entry'
+
+    def get_queryset(self):
+        qs = PowerMoneyEntry.objects.select_related('client', 'matter').prefetch_related('dealings')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=self.request.user.firm) | Q(matter__isnull=True))
+        return qs
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        balance = self.object.amount_held or 0
+        dealing_rows = []
+        for dealing in self.object.dealings.all().order_by('dealing_date', 'id'):
+            balance = balance + dealing.deposit - dealing.withdrawal
+            dealing_rows.append({
+                'dealing': dealing,
+                'balance': balance,
+            })
+        ctx['dealing_rows'] = dealing_rows
+        return ctx
+
+
+class PowerMoneyDealingCreateView(AdminOrAccountantMixin, CreateView):
+    model = PowerMoneyDealing
+    form_class = PowerMoneyDealingForm
+    template_name = 'trust/power_money_dealing_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.power_entry = get_object_or_404(PowerMoneyEntry, pk=kwargs['entry_pk'])
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        form.instance.power_entry = self.power_entry
+        messages.success(self.request, 'Power / estate dealing recorded.')
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['entry'] = self.power_entry
+        return ctx
+
+    def get_success_url(self):
+        return reverse('trust:power_money_detail', kwargs={'pk': self.power_entry.pk})
+
+
+class PowerMoneyPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, *args, **kwargs):
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+        qs = PowerMoneyEntry.objects.select_related('client', 'matter')
+        if hasattr(request.user, 'firm') and request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=request.user.firm) | Q(matter__isnull=True))
+        qs = qs.order_by('-power_date', 'donor', 'deceased_name')
+
+        buffer = io.BytesIO()
+        styles = getSampleStyleSheet()
+        normal = styles['Normal'].clone('pe_cell')
+        normal.fontSize = 7
+        normal.leading = 8
+        header = styles['Normal'].clone('pe_header')
+        header.fontName = 'Helvetica-Bold'
+        header.fontSize = 7
+        header.leading = 8
+
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=1*cm, rightMargin=1*cm, topMargin=1.2*cm, bottomMargin=1.2*cm)
+        generated_at = timezone.localtime(timezone.now()).strftime('%d %b %Y %I:%M %p %Z')
+
+        elements = [
+            Paragraph('Register of Powers and Estates', styles['Heading1']),
+            Paragraph(f'Generated: {generated_at}', styles['Normal']),
+            Spacer(1, 0.3*cm),
+        ]
+
+        data = [[
+            Paragraph('Date of Power', header),
+            Paragraph('Donor / Deceased', header),
+            Paragraph('Address', header),
+            Paragraph('Matter Reference', header),
+            Paragraph('Description of Power', header),
+            Paragraph('Date of Death', header),
+            Paragraph('Responsible Solicitor', header),
+            Paragraph('Authority Doc', header),
+        ]]
+
+        for e in qs:
+            data.append([
+                Paragraph(str(e.power_date) if e.power_date else '-', normal),
+                Paragraph(e.deceased_name or e.donor or str(e.client or '-'), normal),
+                Paragraph(e.donor_address or '-', normal),
+                Paragraph(e.matter_reference or str(e.matter or '-'), normal),
+                Paragraph(e.description or e.get_entry_type_display(), normal),
+                Paragraph(str(e.date_of_death) if e.date_of_death else '-', normal),
+                Paragraph(e.responsible_solicitor or '-', normal),
+                Paragraph('Attached' if e.power_instrument or e.authority_document else 'None', normal),
+            ])
+
+        if len(data) == 1:
+            data.append([Paragraph('-', normal)] * 8)
+
+        table = Table(data, colWidths=[2.0*cm, 4.0*cm, 4.5*cm, 3.0*cm, 6.0*cm, 2.0*cm, 3.5*cm, 1.7*cm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('PADDING', (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(table)
+        doc.build(elements)
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="powers_estates_register.pdf"'
+        return response
+
+
+class TransitMoneyEntryListView(AdminOrAccountantMixin, ListView):
+    model = TransitMoneyEntry
+    template_name = 'trust/transit_money_list.html'
+    context_object_name = 'transit_entries'
+
+    def get_queryset(self):
+        qs = TransitMoneyEntry.objects.select_related('client', 'matter')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=self.request.user.firm) | Q(matter__isnull=True))
+        status = self.request.GET.get('status', 'all')
+        if status == 'pending':
+            qs = qs.filter(paid_on__isnull=True)
+        elif status == 'completed':
+            qs = qs.filter(paid_on__isnull=False)
+        return qs.order_by('-received_on')
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        scoped = self.get_queryset()
+        ctx['pending_count'] = scoped.filter(paid_on__isnull=True).count()
+        ctx['status_filter'] = self.request.GET.get('status', 'all')
+        return ctx
+
+
+class TransitMoneyEntryCreateView(AdminOrAccountantMixin, CreateView):
+    model = TransitMoneyEntry
+    form_class = TransitMoneyEntryForm
+    template_name = 'trust/transit_money_form.html'
+
+    def get_success_url(self):
+        messages.success(self.request, 'Transit money entry created.')
+        return reverse('trust:transit_money_list')
+
+
+class TransitMoneyEntryUpdateView(AdminOrAccountantMixin, UpdateView):
+    model = TransitMoneyEntry
+    form_class = TransitMoneyEntryForm
+    template_name = 'trust/transit_money_form.html'
+
+    def get_queryset(self):
+        qs = TransitMoneyEntry.objects.select_related('client', 'matter')
+        if hasattr(self.request.user, 'firm') and self.request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=self.request.user.firm) | Q(matter__isnull=True))
+        return qs
+
+    def get_success_url(self):
+        messages.success(self.request, 'Transit money entry updated.')
+        return reverse('trust:transit_money_list')
+
+
+class TransitMoneyPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, *args, **kwargs):
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+        qs = TransitMoneyEntry.objects.select_related('client', 'matter')
+        if hasattr(request.user, 'firm') and request.user.firm_id:
+            qs = qs.filter(Q(matter__firm=request.user.firm) | Q(matter__isnull=True))
+        qs = qs.order_by('-received_on')
+
+        buffer = io.BytesIO()
+        styles = getSampleStyleSheet()
+        normal = styles['Normal'].clone('tm_cell')
+        normal.fontSize = 7
+        normal.leading = 8
+        header = styles['Normal'].clone('tm_header')
+        header.fontName = 'Helvetica-Bold'
+        header.fontSize = 7
+        header.leading = 8
+
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=landscape(A4),
+            leftMargin=1 * cm,
+            rightMargin=1 * cm,
+            topMargin=1.2 * cm,
+            bottomMargin=1.2 * cm
+)
+
+        generated_at = timezone.localtime(timezone.now()).strftime('%d %b %Y %I:%M %p %Z')
+        elements = [
+            Paragraph('Transit Money Register', styles['Heading1']),
+            Paragraph(f'Generated: {generated_at}', styles['Normal']),
+            Spacer(1, 0.3 * cm),
+            Paragraph('Register of brief particulars and retained supporting records for transit money under Section 140.', styles['Normal']),
+            Spacer(1, 0.3 * cm),
+        ]
+
+        data = [[
+            Paragraph('Received', header),
+            Paragraph('Client', header),
+            Paragraph('Matter', header),
+            Paragraph('Payor', header),
+            Paragraph('Amount', header),
+            Paragraph('To be paid/delivered to', header),
+            Paragraph('Paid/Delivered', header),
+            Paragraph('Purpose / Instructions', header),
+            Paragraph('Instructions Doc', header),
+            Paragraph('Supporting Doc', header),
+            Paragraph('Status', header),
+        ]]
+
+        for e in qs:
+            data.append([
+                Paragraph(str(e.received_on), normal),
+                Paragraph(str(e.client) if e.client else '-', normal),
+                Paragraph(str(e.matter) if e.matter else '-', normal),
+                Paragraph(e.payor or '-', normal),
+                Paragraph(f'${e.amount}', normal),
+                Paragraph(e.to_be_paid_to or '-', normal),
+                Paragraph(str(e.paid_on) if e.paid_on else '-', normal),
+                Paragraph((e.purpose or e.notes or '-')[:400], normal),
+                Paragraph('Yes' if e.instructions_document else 'No', normal),
+                Paragraph('Yes' if e.supporting_document else 'No', normal),
+                Paragraph(e.status, normal),
+            ])
+
+        if len(data) == 1:
+            data.append([Paragraph('-', normal)] * 11)
+
+        table = Table(
+            data,
+            colWidths=[1.8*cm, 2.8*cm, 3.2*cm, 2.8*cm, 1.7*cm, 3.2*cm, 1.8*cm, 6.0*cm, 1.6*cm, 1.6*cm, 1.5*cm],
+            repeatRows=1
+)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('PADDING', (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(table)
+        doc.build(elements)
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="transit_money_register.pdf"'
+        return response
+
+
+class WrittenDirectionListView(AdminOrAccountantMixin, ListView):
+    model = WrittenDirection
+    template_name = 'trust/written_direction_list.html'
+    context_object_name = 'written_directions'
+
+    def get_queryset(self):
+        return (
+            scope_trust_queryset_for_user(
+                WrittenDirection.objects.select_related('client', 'matter', 'linked_transaction'),
+                self.request.user,
+                firm_lookup='matter__firm'
+)
+            .order_by('-signed_on', 'client__name')
+        )
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['active_count'] = self.get_queryset().count()
+        return ctx
+
+
+class WrittenDirectionCreateView(AdminOrAccountantMixin, CreateView):
+    model = WrittenDirection
+    form_class = WrittenDirectionForm
+    template_name = 'trust/written_direction_form.html'
+
+    def get_success_url(self):
+        messages.success(self.request, 'Written direction created.')
+        return reverse('trust:written_direction_list')
+
+
+class WrittenDirectionUpdateView(AdminOrAccountantMixin, UpdateView):
+    model = WrittenDirection
+    form_class = WrittenDirectionForm
+    template_name = 'trust/written_direction_form.html'
+
+    def get_queryset(self):
+        return scope_trust_queryset_for_user(
+            WrittenDirection.objects.select_related('client', 'matter', 'linked_transaction'),
+            self.request.user,
+            firm_lookup='matter__firm'
+)
+
+    def get_success_url(self):
+        messages.success(self.request, 'Written direction updated.')
+        return reverse('trust:written_direction_list')
+
+
+class WrittenDirectionPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, *args, **kwargs):
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+        qs = (
+            scope_trust_queryset_for_user(
+                WrittenDirection.objects.select_related('client', 'matter', 'linked_transaction'),
+                request.user,
+                firm_lookup='matter__firm'
+)
+            .order_by('-signed_on', 'client__name')
+        )
+
+        buffer = io.BytesIO()
+        styles = getSampleStyleSheet()
+        normal = styles['Normal'].clone('wd_cell')
+        normal.fontSize = 7
+        normal.leading = 8
+        header = styles['Normal'].clone('wd_header')
+        header.fontName = 'Helvetica-Bold'
+        header.fontSize = 7
+        header.leading = 8
+
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=landscape(A4),
+            leftMargin=1 * cm,
+            rightMargin=1 * cm,
+            topMargin=1.2 * cm,
+            bottomMargin=1.2 * cm
+)
+
+        generated_at = timezone.localtime(timezone.now()).strftime('%d %b %Y %I:%M %p %Z')
+        elements = [
+            Paragraph('Written Direction Register', styles['Heading1']),
+            Paragraph(f'Generated: {generated_at}', styles['Normal']),
+            Spacer(1, 0.3 * cm),
+            Paragraph('Register of written direction money records retained for Section 137(a) / Rule 34 compliance.', styles['Normal']),
+            Spacer(1, 0.3 * cm),
+        ]
+
+        data = [[
+            Paragraph('Client', header),
+            Paragraph('Matter', header),
+            Paragraph('Date', header),
+            Paragraph('Direction / Legal Basis', header),
+            Paragraph('Linked Transaction', header),
+            Paragraph('Document', header),
+        ]]
+
+        for wd in qs:
+            data.append([
+                Paragraph(str(wd.client), normal),
+                Paragraph(str(wd.matter) if wd.matter else '-', normal),
+                Paragraph(wd.signed_on.strftime('%d %b %Y') if wd.signed_on else '-', normal),
+                Paragraph((wd.direction_text or '-')[:500], normal),
+                Paragraph(str(wd.linked_transaction) if wd.linked_transaction else '-', normal),
+                Paragraph('Yes' if wd.document else 'No', normal),
+            ])
+
+        table = Table(
+            data,
+            colWidths=[3.2*cm, 4.2*cm, 2.0*cm, 10.0*cm, 4.0*cm, 1.7*cm],
+            repeatRows=1
+)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('PADDING', (0, 0), (-1, -1), 3),
+        ]))
+        elements.append(table)
+        doc.build(elements)
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = 'attachment; filename="written_direction_register.pdf"'
+        return response
 
 
 class DepositRecordListView(AdminOrAccountantMixin, ListView):
@@ -442,8 +1165,8 @@ class DepositRecordListView(AdminOrAccountantMixin, ListView):
             scope_trust_queryset_for_user(
                 DepositRecord.objects.select_related('trust_account', 'prepared_by'),
                 self.request.user,
-                firm_lookup='trust_account__firm',
-            )
+                firm_lookup='trust_account__firm'
+)
             .order_by('-deposit_date', '-deposit_number')
         )
 
@@ -481,8 +1204,8 @@ class DepositRecordCreateView(AdminOrAccountantMixin, FormView):
                 deposit_type=form.cleaned_data['deposit_type'],
                 deposit_date=form.cleaned_data['deposit_date'],
                 prepared_by=self.request.user,
-                notes=form.cleaned_data.get('notes', ''),
-            )
+                notes=form.cleaned_data.get('notes', '')
+)
             for receipt in form.cleaned_data['receipt_objects']:
                 receipt.deposit_record = deposit
                 receipt.save(update_fields=['deposit_record'])
@@ -508,16 +1231,16 @@ class DepositRecordDetailView(AdminOrAccountantMixin, DetailView):
         return scope_trust_queryset_for_user(
             DepositRecord.objects.select_related('trust_account', 'prepared_by'),
             self.request.user,
-            firm_lookup='trust_account__firm',
-        )
+            firm_lookup='trust_account__firm'
+)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         ctx['receipts'] = self.object.receipts.select_related(
             'transaction',
             'transaction__matter_ledger',
-            'transaction__matter_ledger__matter',
-        ).order_by('receipt_number')
+            'transaction__matter_ledger__matter'
+).order_by('receipt_number')
         return ctx
 
 
@@ -528,8 +1251,8 @@ class DepositRecordPDFView(AdminOrAccountantMixin, DetailView):
         return scope_trust_queryset_for_user(
             DepositRecord.objects.select_related('trust_account', 'prepared_by'),
             self.request.user,
-            firm_lookup='trust_account__firm',
-        )
+            firm_lookup='trust_account__firm'
+)
 
     def get(self, request, *args, **kwargs):
         deposit_record = self.get_object()
@@ -548,9 +1271,8 @@ class ReconciliationListView(StaffRequiredMixin, ListView):
     def get_queryset(self):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by'),
-            self.request.user,
-        )
-
+            self.request.user
+)
 
 
 class ReconciliationCreateView(AdminOrAccountantMixin, CreateView):
@@ -595,8 +1317,8 @@ class ReconciliationCreateView(AdminOrAccountantMixin, CreateView):
         opening, receipts, payments, closing = trust_reports._cash_book_amounts_for_period(
             trust_account,
             period_start,
-            period_end,
-        )
+            period_end
+)
         ledger_balances = trust_reports.calculate_ledger_balances_as_at(trust_account, period_end)
         ledger_total = sum(ledger_balances.values(), Decimal('0.00'))
 
@@ -672,8 +1394,8 @@ class ReconciliationDetailView(StaffRequiredMixin, DetailView):
     def get_queryset(self):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by'),
-            self.request.user,
-        )
+            self.request.user
+)
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
@@ -691,7 +1413,6 @@ class ReconciliationDetailView(StaffRequiredMixin, DetailView):
             and self.request.user.role in ('admin', 'accountant')
         )
         return ctx
-
 
 
 def _cash_book_direction(txn):
@@ -732,8 +1453,8 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
     def get_reconciliation(self):
         queryset = scope_trust_queryset_for_user(
             MonthlyReconciliation.objects.select_related('trust_account', 'accounting_period'),
-            self.request.user,
-        )
+            self.request.user
+)
         return get_object_or_404(queryset, pk=self.kwargs['pk'])
 
     def _period_start(self, reconciliation):
@@ -747,15 +1468,15 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
                 matter_ledger__trust_account=reconciliation.trust_account,
                 date_received_or_paid__gte=period_start,
                 date_received_or_paid__lte=reconciliation.period_end,
-                transaction_type__in=['receipt', 'payment', 'transfer_to_office', 'reversal'],
-            )
+                transaction_type__in=['receipt', 'payment', 'transfer_to_office', 'reversal']
+)
             .select_related(
                 'matter_ledger__matter',
                 'matter_ledger__matter__client',
                 'receipt',
                 'payment',
-                'reverses',
-            )
+                'reverses'
+)
             .order_by('date_received_or_paid', 'pk')
         )
 
@@ -766,8 +1487,8 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
                 reconciliation__trust_account=reconciliation.trust_account,
                 reconciliation__period_end__lt=reconciliation.period_end,
                 carry_forward_until_cleared=True,
-                cleared_by_transaction__isnull=True,
-            )
+                cleared_by_transaction__isnull=True
+)
             .select_related('reconciliation', 'matched_transaction')
             .order_by('reconciliation__period_end', 'line_date', 'pk')
         )
@@ -839,8 +1560,8 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
                 'matched_transaction__matter_ledger__matter',
                 'cleared_by_transaction',
                 'cleared_by_transaction__matter_ledger__matter',
-                'cleared_in_reconciliation',
-            )
+                'cleared_in_reconciliation'
+)
             .order_by('line_date', 'pk')
         )
         buckets = self._worksheet_buckets(reconciliation, internal_transactions, bank_lines)
@@ -951,8 +1672,8 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
         if action == 'confirm_transaction':
             txn = get_object_or_404(
                 self._internal_transactions(reconciliation),
-                pk=request.POST.get('transaction_id'),
-            )
+                pk=request.POST.get('transaction_id')
+)
 
             direction = _cash_book_direction(txn)
             if direction not in {'credit', 'debit'}:
@@ -975,8 +1696,8 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
                 matched_transaction=txn,
                 created_by=request.user,
                 matched_by=request.user,
-                matched_at=timezone.now(),
-            )
+                matched_at=timezone.now()
+)
             self._update_totals_from_worksheet(reconciliation)
             messages.success(request, 'Cash book entry confirmed on authorised ADI bank statement.')
             return redirect(reverse('trust:reconciliation_worksheet', kwargs={'pk': reconciliation.pk}))
@@ -1030,12 +1751,12 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
         elif action == 'clear_adjustment':
             line = get_object_or_404(
                 self._prior_uncleared_adjustments(reconciliation),
-                pk=request.POST.get('line_id'),
-            )
+                pk=request.POST.get('line_id')
+)
             txn = get_object_or_404(
                 self._internal_transactions(reconciliation),
-                pk=request.POST.get('cleared_by_transaction'),
-            )
+                pk=request.POST.get('cleared_by_transaction')
+)
             line.cleared_by_transaction = txn
             line.cleared_in_reconciliation = reconciliation
             line.cleared_by = request.user
@@ -1060,7 +1781,6 @@ class ReconciliationWorksheetView(AdminOrAccountantMixin, TemplateView):
         return redirect(reverse('trust:reconciliation_worksheet', kwargs={'pk': reconciliation.pk}))
 
 
-
 class ReconciliationBankStatementView(AdminOrAccountantMixin, UpdateView):
     model = MonthlyReconciliation
     form_class = ReconciliationBankStatementForm
@@ -1070,8 +1790,8 @@ class ReconciliationBankStatementView(AdminOrAccountantMixin, UpdateView):
     def get_queryset(self):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('trust_account', 'accounting_period', 'finalised_by'),
-            self.request.user,
-        )
+            self.request.user
+)
 
     def get(self, request, *args, **kwargs):
         self.object = self.get_object()
@@ -1081,8 +1801,8 @@ class ReconciliationBankStatementView(AdminOrAccountantMixin, UpdateView):
             return FileResponse(
                 self.object.bank_statement_pdf.open('rb'),
                 as_attachment=True,
-                filename=self.object.bank_statement_pdf.name.split('/')[-1],
-            )
+                filename=self.object.bank_statement_pdf.name.split('/')[-1]
+)
         if self.object.is_finalised:
             messages.warning(request, 'Finalised reconciliations cannot have bank statement evidence replaced.')
             return redirect(self.get_success_url())
@@ -1110,8 +1830,8 @@ class ReconciliationFinaliseView(AdminOrAccountantMixin, FormView):
     def get_reconciliation(self):
         queryset = scope_trust_queryset_for_user(
             MonthlyReconciliation.objects.select_related('trust_account', 'accounting_period'),
-            self.request.user,
-        )
+            self.request.user
+)
         return get_object_or_404(queryset, pk=self.kwargs['pk'])
 
     def get_context_data(self, **kwargs):
@@ -1141,8 +1861,8 @@ class AccountingPeriodListView(StaffRequiredMixin, ListView):
     def get_queryset(self):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('trust_account', 'locked_by'),
-            self.request.user,
-        )
+            self.request.user
+)
 
 
 class AccountingPeriodDetailView(StaffRequiredMixin, DetailView):
@@ -1153,8 +1873,8 @@ class AccountingPeriodDetailView(StaffRequiredMixin, DetailView):
     def get_queryset(self):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('trust_account', 'locked_by').prefetch_related('monthly_records'),
-            self.request.user,
-        )
+            self.request.user
+)
 
 
 class AccountingPeriodLockView(AdminOrAccountantMixin, FormView):
@@ -1164,8 +1884,8 @@ class AccountingPeriodLockView(AdminOrAccountantMixin, FormView):
     def get_period(self):
         queryset = scope_trust_queryset_for_user(
             TrustAccountingPeriod.objects.select_related('trust_account'),
-            self.request.user,
-        )
+            self.request.user
+)
         return get_object_or_404(queryset, pk=self.kwargs['pk'])
 
     def get_form_kwargs(self):
@@ -1198,8 +1918,8 @@ class MonthlyRecordListView(StaffRequiredMixin, ListView):
     def get_queryset(self):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('trust_account', 'accounting_period', 'generated_by'),
-            self.request.user,
-        )
+            self.request.user
+)
 
 
 class MonthlyRecordDetailView(StaffRequiredMixin, DetailView):
@@ -1210,16 +1930,16 @@ class MonthlyRecordDetailView(StaffRequiredMixin, DetailView):
     def get_queryset(self):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('trust_account', 'accounting_period', 'generated_by'),
-            self.request.user,
-        )
+            self.request.user
+)
 
 
 class MonthlyRecordDownloadView(StaffRequiredMixin, View):
     def get(self, request, pk):
         queryset = scope_trust_queryset_for_user(
             TrustMonthlyRecord.objects.select_related('trust_account', 'accounting_period'),
-            request.user,
-        )
+            request.user
+)
         record = get_object_or_404(queryset, pk=pk)
         if not record.pdf:
             raise Http404('Monthly record PDF not found.')
@@ -1236,8 +1956,8 @@ class IrregularityListView(StaffRequiredMixin, ListView):
     def get_queryset(self):
         return scope_trust_queryset_for_user(
             super().get_queryset().select_related('trust_account'),
-            self.request.user,
-        )
+            self.request.user
+)
 
 
 class IrregularityCreateView(AdminOrAccountantMixin, CreateView):
@@ -1264,8 +1984,8 @@ class IrregularityDetailView(StaffRequiredMixin, View):
     def get_irregularity(self, pk):
         queryset = scope_trust_queryset_for_user(
             Irregularity.objects.select_related('trust_account'),
-            self.request.user,
-        )
+            self.request.user
+)
         return get_object_or_404(queryset, pk=pk)
 
     def get(self, request, pk):
@@ -1291,8 +2011,8 @@ def build_reports_context(request, trial_balance_account_id=None, trial_balance_
     accounts = list(scope_trust_queryset_for_user(
         TrustAccount.objects.filter(is_active=True),
         request.user,
-        firm_lookup='firm',
-    ))
+        firm_lookup='firm'
+))
     for account in accounts:
         account.trial_balance_as_at_value = ''
         account.trial_balance_error = ''
@@ -1313,14 +2033,14 @@ def _outstanding_cheque_rows(trust_account, age_filter='all'):
         .filter(
             transaction__matter_ledger__trust_account=trust_account,
             payment_method='cheque',
-            transaction__is_reversed=False,
-        )
+            transaction__is_reversed=False
+)
         .select_related(
             'transaction',
             'transaction__matter_ledger',
             'transaction__matter_ledger__matter',
-            'transaction__matter_ledger__matter__client',
-        )
+            'transaction__matter_ledger__matter__client'
+)
         .order_by('transaction__date_received_or_paid', 'payment_number')
     )
 
@@ -1411,6 +2131,83 @@ class OutstandingChequesPDFView(AdminOrAccountantMixin, View):
         return response
 
 
+class UnclaimedMoneyRecordListView(StaffRequiredMixin, ListView):
+    model = UnclaimedMoneyRecord
+    template_name = 'trust/unclaimed_money_list.html'
+    context_object_name = 'records'
+
+    def get_queryset(self):
+        qs = UnclaimedMoneyRecord.objects.select_related(
+            'firm',
+            'trust_account',
+            'matter_ledger',
+            'matter_ledger__matter',
+            'matter_ledger__matter__client',
+            'reviewed_by'
+)
+        firm = getattr(self.request.user, 'firm', None)
+        if firm:
+            qs = qs.filter(firm=firm)
+        status = self.request.GET.get('status')
+        if status:
+            qs = qs.filter(status=status)
+        return qs.order_by('-date_identified', '-created_at')
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['status_choices'] = UnclaimedMoneyRecord.STATUS_CHOICES
+        ctx['selected_status'] = self.request.GET.get('status', '')
+        return ctx
+
+
+class UnclaimedMoneyRecordCreateView(StaffRequiredMixin, CreateView):
+    model = UnclaimedMoneyRecord
+    form_class = UnclaimedMoneyRecordForm
+    template_name = 'trust/unclaimed_money_form.html'
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['firm'] = getattr(self.request.user, 'firm', None)
+        return kwargs
+
+    def form_valid(self, form):
+        firm = getattr(self.request.user, 'firm', None)
+        if firm:
+            form.instance.firm = firm
+        if not form.instance.amount and form.instance.matter_ledger_id:
+            form.instance.amount = form.instance.matter_ledger.balance
+        form.instance.created_by = self.request.user
+        messages.success(self.request, 'Unclaimed money review record created.')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('trust:unclaimed_money_list')
+
+
+class UnclaimedMoneyRecordUpdateView(StaffRequiredMixin, UpdateView):
+    model = UnclaimedMoneyRecord
+    form_class = UnclaimedMoneyRecordForm
+    template_name = 'trust/unclaimed_money_form.html'
+
+    def get_queryset(self):
+        qs = UnclaimedMoneyRecord.objects.select_related('firm', 'trust_account', 'matter_ledger')
+        firm = getattr(self.request.user, 'firm', None)
+        if firm:
+            qs = qs.filter(firm=firm)
+        return qs
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['firm'] = getattr(self.request.user, 'firm', None)
+        return kwargs
+
+    def form_valid(self, form):
+        messages.success(self.request, 'Unclaimed money review record updated.')
+        return super().form_valid(form)
+
+    def get_success_url(self):
+        return reverse('trust:unclaimed_money_list')
+
 class ReportsLandingView(StaffRequiredMixin, TemplateView):
     template_name = 'trust/reports.html'
 
@@ -1424,8 +2221,8 @@ class ReceiptsJournalPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
         account = get_object_or_404(
             scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
-            pk=pk,
-        )
+            pk=pk
+)
         form = DateRangeForm(request.GET)
         if form.is_valid():
             date_from = form.cleaned_data.get('date_from') or datetime.date(datetime.date.today().year, 1, 1)
@@ -1440,8 +2237,8 @@ class PaymentsJournalPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
         account = get_object_or_404(
             scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
-            pk=pk,
-        )
+            pk=pk
+)
         form = DateRangeForm(request.GET)
         if form.is_valid():
             date_from = form.cleaned_data.get('date_from') or datetime.date(datetime.date.today().year, 1, 1)
@@ -1452,13 +2249,12 @@ class PaymentsJournalPDFView(StaffRequiredMixin, View):
         return trust_reports.payments_journal_pdf(account, date_from, date_to)
 
 
-
 class TrustCashBookSummaryPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
         account = get_object_or_404(
             scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
-            pk=pk,
-        )
+            pk=pk
+)
         form = DateRangeForm(request.GET)
         if form.is_valid():
             date_from = form.cleaned_data.get('date_from') or datetime.date(datetime.date.today().year, 1, 1)
@@ -1473,8 +2269,8 @@ class TrustTransferJournalPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
         account = get_object_or_404(
             scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
-            pk=pk,
-        )
+            pk=pk
+)
         form = DateRangeForm(request.GET)
         if form.is_valid():
             date_from = form.cleaned_data.get('date_from') or datetime.date(datetime.date.today().year, 1, 1)
@@ -1489,8 +2285,8 @@ class TrialBalancePDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
         account = get_object_or_404(
             scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
-            pk=pk,
-        )
+            pk=pk
+)
         as_at_param = request.GET.get('as_at')
         if as_at_param:
             as_at = parse_date(as_at_param)
@@ -1503,8 +2299,8 @@ class TrialBalancePDFView(StaffRequiredMixin, View):
                 request,
                 trial_balance_account_id=account.pk,
                 trial_balance_as_at=as_at_param or as_at.isoformat(),
-                trial_balance_error='As at date cannot be in the future.',
-            )
+                trial_balance_error='As at date cannot be in the future.'
+)
             return render(request, 'trust/reports.html', context, status=400)
         return trust_reports.trust_trial_balance_pdf(account, as_at)
 
@@ -1513,8 +2309,8 @@ class ExaminerPackZipView(AdminOrAccountantMixin, View):
     def get(self, request, pk):
         account = get_object_or_404(
             scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
-            pk=pk,
-        )
+            pk=pk
+)
         form = YearForm(request.GET)
         if form.is_valid():
             year = form.cleaned_data['year']
@@ -1527,8 +2323,8 @@ class TrustRecordsExportPackZipView(AdminOrAccountantMixin, View):
     def get(self, request, pk):
         account = get_object_or_404(
             scope_trust_queryset_for_user(TrustAccount.objects.all(), request.user, firm_lookup='firm'),
-            pk=pk,
-        )
+            pk=pk
+)
         date_from = parse_date(request.GET.get('date_from') or '') if request.GET.get('date_from') else None
         date_to = parse_date(request.GET.get('date_to') or '') if request.GET.get('date_to') else None
         year = None
@@ -1543,16 +2339,16 @@ class TrustRecordsExportPackZipView(AdminOrAccountantMixin, View):
             date_to=date_to,
             year=year,
             all_data=request.GET.get('all') in {'1', 'true', 'yes'},
-            include_technical=request.GET.get('include_technical') in {'1', 'true', 'yes'},
-        )
+            include_technical=request.GET.get('include_technical') in {'1', 'true', 'yes'}
+)
 
 
 class LedgerStatementPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
         ledger = get_object_or_404(
             scope_trust_queryset_for_user(MatterLedger.objects.select_related('trust_account'), request.user),
-            pk=pk,
-        )
+            pk=pk
+)
         return trust_reports.matter_ledger_statement_pdf(ledger)
 
 
@@ -1561,10 +2357,10 @@ class TrustAccountStatementPDFView(StaffRequiredMixin, View):
         ledger = get_object_or_404(
             scope_trust_queryset_for_user(
                 MatterLedger.objects.select_related('trust_account__firm', 'matter__client'),
-                request.user,
-            ),
-            pk=pk,
-        )
+                request.user
+),
+            pk=pk
+)
         date_from = parse_date(request.GET.get('date_from') or '') if request.GET.get('date_from') else None
         date_to = parse_date(request.GET.get('date_to') or '') if request.GET.get('date_to') else None
         return trust_reports.trust_account_statement_pdf(ledger, date_from, date_to)
@@ -1574,8 +2370,8 @@ class ReconciliationPDFView(StaffRequiredMixin, View):
     def get(self, request, pk):
         recon = get_object_or_404(
             scope_trust_queryset_for_user(MonthlyReconciliation.objects.select_related('trust_account'), request.user),
-            pk=pk,
-        )
+            pk=pk
+)
         return trust_reports.monthly_reconciliation_pdf(recon)
 
 
@@ -1585,10 +2381,10 @@ class ReceiptPDFView(StaffRequiredMixin, View):
             scope_trust_queryset_for_user(
                 Receipt.objects.select_related('transaction__matter_ledger__trust_account'),
                 request.user,
-                firm_lookup='transaction__matter_ledger__trust_account__firm',
-            ),
-            pk=pk,
-        )
+                firm_lookup='transaction__matter_ledger__trust_account__firm'
+),
+            pk=pk
+)
         return trust_reports.receipt_pdf(receipt)
 
 
@@ -1599,15 +2395,14 @@ class PaymentPDFView(StaffRequiredMixin, View):
                 Payment.objects.select_related(
                     'transaction__matter_ledger__trust_account__firm',
                     'transaction__matter_ledger__matter__client',
-                    'authorised_by',
-                ),
+                    'authorised_by'
+),
                 request.user,
-                firm_lookup='transaction__matter_ledger__trust_account__firm',
-            ),
-            pk=pk,
-        )
+                firm_lookup='transaction__matter_ledger__trust_account__firm'
+),
+            pk=pk
+)
         return trust_reports.payment_pdf(payment)
-
 
 
 class TrustJournalDetailView(StaffRequiredMixin, DetailView):
@@ -1623,11 +2418,11 @@ class TrustJournalDetailView(StaffRequiredMixin, DetailView):
                 'to_ledger__matter__client',
                 'created_by',
                 'journal_out_txn',
-                'journal_in_txn',
-            ),
+                'journal_in_txn'
+),
             self.request.user,
-            firm_lookup='from_ledger__trust_account__firm',
-        )
+            firm_lookup='from_ledger__trust_account__firm'
+)
 
 
 class TrustJournalPDFView(StaffRequiredMixin, View):
@@ -1640,13 +2435,13 @@ class TrustJournalPDFView(StaffRequiredMixin, View):
                     'to_ledger__matter__client',
                     'created_by',
                     'journal_out_txn',
-                    'journal_in_txn',
-                ),
+                    'journal_in_txn'
+),
                 request.user,
-                firm_lookup='from_ledger__trust_account__firm',
-            ),
-            pk=pk,
-        )
+                firm_lookup='from_ledger__trust_account__firm'
+),
+            pk=pk
+)
         return trust_reports.trust_journal_pdf(journal)
 
 
@@ -1710,10 +2505,322 @@ class ControlledMoneyWithdrawalCreateView(AdminOrAccountantMixin, CreateView):
         return ctx
     def get_success_url(self): return reverse('trust:controlled_money_detail', kwargs={'pk': self.object.controlled_money_account_id})
 
+class ControlledMoneyWithdrawalPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, pk, *args, **kwargs):
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+        withdrawal = get_object_or_404(
+            scope_trust_queryset_for_user(
+                ControlledMoneyWithdrawal.objects.select_related('controlled_money_account', 'controlled_money_account__firm', 'controlled_money_account__client', 'controlled_money_account__matter'),
+                request.user,
+                firm_lookup='controlled_money_account__firm'
+),
+            pk=pk
+)
+        account = withdrawal.controlled_money_account
+
+        buffer = io.BytesIO()
+        styles = getSampleStyleSheet()
+        normal = styles['Normal'].clone('cmw_cell')
+        normal.fontSize = 8
+        normal.leading = 10
+        header = styles['Normal'].clone('cmw_header')
+        header.fontName = 'Helvetica-Bold'
+        header.fontSize = 8
+        header.leading = 10
+
+        doc = SimpleDocTemplate(buffer, pagesize=A4, leftMargin=1.4*cm, rightMargin=1.4*cm, topMargin=1.4*cm, bottomMargin=1.4*cm)
+        generated_at = timezone.localtime(timezone.now()).strftime('%d %b %Y %I:%M %p %Z')
+
+        destination = '-'
+        if withdrawal.withdrawal_method == 'eft':
+            destination = f"{withdrawal.destination_account_name or ''} BSB {withdrawal.destination_bsb or ''} Account {withdrawal.destination_account_number or ''}".strip()
+
+        authority_attached = 'Yes' if withdrawal.supporting_authority else 'No'
+
+        rows = [
+            ['Reference Number', withdrawal.transaction_number or '-'],
+            ['Generated', generated_at],
+            ['Controlled Money Account', account.account_name],
+            ['ADI / BSB / Account', f"{account.bank} / {account.bsb} / {account.account_number}"],
+            ['Withdrawal Date', str(withdrawal.date)],
+            ['Matter Reference', withdrawal.matter_reference or account.matter_reference or '-'],
+            ['Client / Person Name', withdrawal.person_on_behalf or account.person_on_behalf or '-'],
+            ['Matter Description', account.matter_description or '-'],
+            ['Amount', f"${withdrawal.amount}"],
+            ['Balance Before Withdrawal', f"${account.current_balance + withdrawal.amount}"],
+            ['Balance After Withdrawal', f"${account.current_balance}"],
+            ['Withdrawal Method', withdrawal.get_withdrawal_method_display()],
+            ['Payee', withdrawal.payee or '-'],
+            ['EFT Destination', destination],
+            ['Person Receiving Benefit', withdrawal.person_receiving_benefit or '-'],
+            ['Reason / Purpose of Payment', withdrawal.reason or '-'],
+            ['Authority Document',
+              withdrawal.supporting_authority.name if withdrawal.supporting_authority else 'Not Attached'],
+            ['Authorised By', withdrawal.authorised_by or '-'],
+        ]
+
+        data = [[Paragraph('Field', header), Paragraph('Value', header)]]
+        for label, value in rows:
+            data.append([Paragraph(str(label), header), Paragraph(str(value), normal)])
+
+        elements = [
+            Paragraph('Controlled Money Payment / Withdrawal Record', styles['Heading1']),
+            Spacer(1, 0.25*cm),
+            Paragraph('Record of withdrawal of controlled money by cheque or electronic funds transfer.', styles['Normal']),
+            Spacer(1, 0.35*cm),
+        ]
+
+        table = Table(data, colWidths=[6.0*cm, 11.5*cm], repeatRows=1)
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+            ('GRID', (0, 0), (-1, -1), 0.35, colors.black),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('PADDING', (0, 0), (-1, -1), 5),
+        ]))
+        elements.append(table)
+        doc.build(elements)
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="controlled_money_withdrawal_{withdrawal.transaction_number or withdrawal.pk}.pdf"'
+        return response
+
+
 class ControlledMoneyReceiptPDFView(AdminOrAccountantMixin, View):
     def get(self, request, pk):
         receipt=get_object_or_404(scope_trust_queryset_for_user(ControlledMoneyReceipt.objects.select_related('firm','controlled_money_account','made_out_by'), request.user, firm_lookup='firm'), pk=pk)
         return trust_reports._pdf_response_from_bytes(f'controlled_money_receipt_{receipt.receipt_number}.pdf', trust_reports.controlled_money_receipt_pdf_bytes(receipt))
+
+class ControlledMoneySupportingDocumentCreateView(AdminOrAccountantMixin, CreateView):
+    model = ControlledMoneySupportingDocument
+    form_class = ControlledMoneySupportingDocumentForm
+    template_name = 'trust/controlled_money/supporting_document_form.html'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.controlled_money_account = get_object_or_404(
+            scope_trust_queryset_for_user(
+                ControlledMoneyAccount.objects.select_related('firm', 'client', 'matter'),
+                request.user,
+                firm_lookup='firm'
+),
+            pk=kwargs['account_pk']
+)
+        return super().dispatch(request, *args, **kwargs)
+
+    def form_valid(self, form):
+        form.instance.controlled_money_account = self.controlled_money_account
+        messages.success(self.request, 'Supporting document uploaded.')
+        return super().form_valid(form)
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        ctx['controlled_money_account'] = self.controlled_money_account
+        return ctx
+
+    def get_success_url(self):
+        return reverse('trust:controlled_money_detail', kwargs={'pk': self.controlled_money_account.pk})
+
+
+class ControlledMoneyRegisterPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, pk, *args, **kwargs):
+        import io
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+        account = get_object_or_404(
+            scope_trust_queryset_for_user(
+                ControlledMoneyAccount.objects.select_related('firm', 'client', 'matter'),
+                request.user,
+                firm_lookup='firm'
+),
+            pk=pk
+)
+        receipts = account.receipts.all().order_by('date_made_out', 'receipt_number')
+        withdrawals = account.withdrawals.all().order_by('date', 'transaction_number')
+        docs = account.supporting_documents.all().order_by('uploaded_at')
+
+        buffer = io.BytesIO()
+        styles = getSampleStyleSheet()
+        normal = styles['Normal'].clone('cm_cell')
+        normal.fontSize = 7
+        normal.leading = 8
+        header = styles['Normal'].clone('cm_header')
+        header.fontName = 'Helvetica-Bold'
+        header.fontSize = 7
+        header.leading = 8
+
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=1*cm, rightMargin=1*cm, topMargin=1.2*cm, bottomMargin=1.2*cm)
+        generated_at = timezone.localtime(timezone.now()).strftime('%d %b %Y %I:%M %p %Z')
+
+        elements = [
+            Paragraph('Controlled Money Register', styles['Heading1']),
+            Paragraph(f'Generated: {generated_at}', styles['Normal']),
+            Spacer(1, 0.25*cm),
+            Paragraph(f'Account: {account.account_name}', styles['Normal']),
+            Paragraph(f'Client/person: {account.person_on_behalf}', styles['Normal']),
+            Paragraph(f'Address: {account.person_address or "-"}', styles['Normal']),
+            Paragraph(f'Matter: {account.matter_reference} {account.matter_description}', styles['Normal']),
+            Paragraph(f'ADI/account: {account.bank} BSB {account.bsb} Account {account.account_number}', styles['Normal']),
+            Paragraph(f'Purpose: {account.purpose or "-"}', styles['Normal']),
+            Paragraph(f'Opened: {account.opened_on or "-"}', styles['Normal']),
+            Paragraph(f'Closed: {account.closed_on or "-"}', styles['Normal']),
+            Paragraph(f'Interest disposition: {account.interest_disposition or "-"}', styles['Normal']),
+            Paragraph(f'Written direction attached: {"Yes" if account.client_instruction_document else "No"}', styles['Normal']),
+            Paragraph(f'Current balance: ${account.current_balance}', styles['Normal']),
+            Spacer(1, 0.35*cm),
+            Paragraph('Receipts', styles['Heading2']),
+        ]
+
+        receipt_rows = [[Paragraph('No.', header), Paragraph('Date Made Out', header), Paragraph('Date Received', header), Paragraph('From', header), Paragraph('Amount', header), Paragraph('Reason', header)]]
+        for r in receipts:
+            receipt_rows.append([
+                Paragraph(str(r.receipt_number), normal),
+                Paragraph(str(r.date_made_out), normal),
+                Paragraph(str(r.date_money_received or r.date_made_out), normal),
+                Paragraph(r.person_from_whom_received or '-', normal),
+                Paragraph(f'${r.amount}', normal),
+                Paragraph(r.reason or '-', normal),
+            ])
+        if len(receipt_rows) == 1:
+            receipt_rows.append([Paragraph('-', normal)] * 6)
+
+        t = Table(receipt_rows, colWidths=[1.2*cm, 2.1*cm, 2.1*cm, 4.0*cm, 2.0*cm, 12.0*cm], repeatRows=1)
+        t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.grey),('GRID',(0,0),(-1,-1),0.35,colors.black),('VALIGN',(0,0),(-1,-1),'TOP'),('PADDING',(0,0),(-1,-1),3)]))
+        elements.append(t)
+
+        elements += [Spacer(1, 0.35*cm), Paragraph('Withdrawals', styles['Heading2'])]
+        withdrawal_rows = [[Paragraph('Txn No.', header), Paragraph('Date', header), Paragraph('Method', header), Paragraph('Payee', header), Paragraph('Amount', header), Paragraph('Reason', header), Paragraph('Authorised By', header)]]
+        for w in withdrawals:
+            withdrawal_rows.append([
+                Paragraph(w.transaction_number or '-', normal),
+                Paragraph(str(w.date), normal),
+                Paragraph(w.get_withdrawal_method_display(), normal),
+                Paragraph(w.payee or '-', normal),
+                Paragraph(f'${w.amount}', normal),
+                Paragraph(w.reason or '-', normal),
+                Paragraph(w.authorised_by or '-', normal),
+            ])
+        if len(withdrawal_rows) == 1:
+            withdrawal_rows.append([Paragraph('-', normal)] * 7)
+
+        t = Table(withdrawal_rows, colWidths=[1.8*cm, 2.0*cm, 2.0*cm, 4.0*cm, 2.0*cm, 9.0*cm, 4.0*cm], repeatRows=1)
+        t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.grey),('GRID',(0,0),(-1,-1),0.35,colors.black),('VALIGN',(0,0),(-1,-1),'TOP'),('PADDING',(0,0),(-1,-1),3)]))
+        elements.append(t)
+
+        elements += [Spacer(1, 0.35*cm), Paragraph('Supporting Documents', styles['Heading2'])]
+        doc_rows = [[Paragraph('Type', header), Paragraph('Description', header), Paragraph('Uploaded', header)]]
+        for d in docs:
+            doc_rows.append([
+                Paragraph(d.document_type or '-', normal),
+                Paragraph(d.description or '-', normal),
+                Paragraph(str(d.uploaded_at), normal),
+            ])
+        if len(doc_rows) == 1:
+            doc_rows.append([Paragraph('-', normal)] * 3)
+
+        t = Table(doc_rows, colWidths=[4.0*cm, 14.0*cm, 5.0*cm], repeatRows=1)
+        t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.grey),('GRID',(0,0),(-1,-1),0.35,colors.black),('VALIGN',(0,0),(-1,-1),'TOP'),('PADDING',(0,0),(-1,-1),3)]))
+        elements.append(t)
+
+        doc.build(elements)
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="controlled_money_register_{account.pk}.pdf"'
+        return response
+
+
+class ControlledMoneyMovementPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, pk, *args, **kwargs):
+        import io
+        from decimal import Decimal
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4, landscape
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.units import cm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+        account = get_object_or_404(
+            scope_trust_queryset_for_user(
+                ControlledMoneyAccount.objects.select_related('firm', 'client', 'matter'),
+                request.user,
+                firm_lookup='firm'
+),
+            pk=pk
+)
+
+        movements = []
+        for r in account.receipts.all():
+            movements.append((r.date_money_received or r.date_made_out, f'Receipt {r.receipt_number}', r.person_from_whom_received, Decimal('0.00'), r.amount, r.reason))
+        for w in account.withdrawals.all():
+            movements.append((w.date, f'Withdrawal {w.transaction_number}', w.payee, w.amount, Decimal('0.00'), w.reason))
+        movements.sort(key=lambda x: (x[0], x[1]))
+
+        buffer = io.BytesIO()
+        styles = getSampleStyleSheet()
+        normal = styles['Normal'].clone('cmm_cell')
+        normal.fontSize = 7
+        normal.leading = 8
+        header = styles['Normal'].clone('cmm_header')
+        header.fontName = 'Helvetica-Bold'
+        header.fontSize = 7
+        header.leading = 8
+
+        doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), leftMargin=1*cm, rightMargin=1*cm, topMargin=1.2*cm, bottomMargin=1.2*cm)
+        generated_at = timezone.localtime(timezone.now()).strftime('%d %b %Y %I:%M %p %Z')
+        elements = [
+            Paragraph('Controlled Money Movement Record', styles['Heading1']),
+            Paragraph(f'Generated: {generated_at}', styles['Normal']),
+            Spacer(1, 0.25*cm),
+            Paragraph(f'Account: {account.account_name}', styles['Normal']),
+            Paragraph(f'Person: {account.person_on_behalf}', styles['Normal']),
+            Paragraph(f'Address: {account.person_address or "-"}', styles['Normal']),
+            Paragraph(f'Matter: {account.matter_reference} {account.matter_description}', styles['Normal']),
+            Paragraph(f'ADI: {account.bank}', styles['Normal']),
+            Paragraph(f'BSB / Account Number: {account.bsb} / {account.account_number}', styles['Normal']),
+            Paragraph(f'Purpose: {account.purpose or "-"}', styles['Normal']),
+            Paragraph(f'Opened: {account.opened_on or "-"}', styles['Normal']),
+            Paragraph(f'Interest disposition: {account.interest_disposition or "-"}', styles['Normal']),
+            Spacer(1, 0.35*cm),
+        ]
+
+        rows = [[Paragraph('Date', header), Paragraph('Reference', header), Paragraph('Paid To / Received From', header), Paragraph('Reason', header), Paragraph('Debit', header), Paragraph('Credit', header), Paragraph('Balance', header)]]
+        balance = Decimal('0.00')
+        for date, ref, party, debit, credit, reason in movements:
+            balance = balance + credit - debit
+            rows.append([
+                Paragraph(str(date), normal),
+                Paragraph(str(ref), normal),
+                Paragraph(party or '-', normal),
+                Paragraph(reason or '-', normal),
+                Paragraph(f'${debit}' if debit else '-', normal),
+                Paragraph(f'${credit}' if credit else '-', normal),
+                Paragraph(f'${balance}', normal),
+            ])
+
+        if len(rows) == 1:
+            rows.append([Paragraph('-', normal)] * 7)
+
+        t = Table(rows, colWidths=[2.0*cm, 3.0*cm, 5.0*cm, 8.0*cm, 2.0*cm, 2.0*cm, 2.0*cm], repeatRows=1)
+        t.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.grey),('GRID',(0,0),(-1,-1),0.35,colors.black),('VALIGN',(0,0),(-1,-1),'TOP'),('PADDING',(0,0),(-1,-1),3)]))
+        elements.append(t)
+        doc.build(elements)
+
+        response = HttpResponse(buffer.getvalue(), content_type='application/pdf')
+        response['Content-Disposition'] = f'attachment; filename="controlled_money_movements_{account.pk}.pdf"'
+        return response
+
+
+class ControlledMoneyAccountStatementPDFView(AdminOrAccountantMixin, View):
+    def get(self, request, pk, *args, **kwargs):
+        return ControlledMoneyMovementPDFView().get(request, pk, *args, **kwargs)
+
 
 class ControlledMoneyMonthlyStatementListView(AdminOrAccountantMixin, ListView):
     model=ControlledMoneyMonthlyStatement; template_name='trust/controlled_money/statements.html'; context_object_name='statements'
@@ -1760,11 +2867,11 @@ class ReversalDetailView(StaffRequiredMixin, DetailView):
                 'reverses',
                 'reverses__matter_ledger__matter__client',
                 'reverses__receipt',
-                'reverses__payment',
-            ),
+                'reverses__payment'
+),
             self.request.user,
-            firm_lookup='matter_ledger__trust_account__firm',
-        )
+            firm_lookup='matter_ledger__trust_account__firm'
+)
 
 
 class ReversalPDFView(StaffRequiredMixin, View):
@@ -1780,11 +2887,270 @@ class ReversalPDFView(StaffRequiredMixin, View):
                     'reverses',
                     'reverses__matter_ledger__matter__client',
                     'reverses__receipt',
-                    'reverses__payment',
-                ),
+                    'reverses__payment'
+),
                 request.user,
-                firm_lookup='matter_ledger__trust_account__firm',
-            ),
-            pk=pk,
-        )
+                firm_lookup='matter_ledger__trust_account__firm'
+),
+            pk=pk
+)
         return trust_reports.reversal_pdf(reversal)
+
+
+class ComplianceReviewLogListView(StaffRequiredMixin, ListView):
+    model = ComplianceReviewLog
+    template_name = "trust/compliance_review_log.html"
+    context_object_name = "review_logs"
+    paginate_by = 25
+
+    def get_queryset(self):
+        return (
+            ComplianceReviewLog.objects
+            .filter(firm=self.request.user.firm)
+            .select_related("matter", "reviewed_by")
+            .order_by("-reviewed_on", "-created_at")
+        )
+
+
+class ComplianceReviewLogCreateView(StaffRequiredMixin, CreateView):
+    model = ComplianceReviewLog
+    form_class = ComplianceReviewLogForm
+    template_name = "trust/compliance_review_form.html"
+    success_url = reverse_lazy("trust:compliance_review_log")
+
+    def get_initial(self):
+        initial = super().get_initial()
+        for field in ["severity", "category", "title", "alert_key", "source_url"]:
+            value = self.request.GET.get(field)
+            if value:
+                initial[field] = value
+        matter_id = self.request.GET.get("matter")
+        if matter_id:
+            initial["matter"] = matter_id
+        return initial
+
+    def form_valid(self, form):
+        form.instance.firm = self.request.user.firm
+        form.instance.reviewed_by = self.request.user
+        form.instance.reviewed_on = timezone.now()
+        return super().form_valid(form)
+
+
+class ComplianceReviewLogUpdateView(StaffRequiredMixin, UpdateView):
+    model = ComplianceReviewLog
+    form_class = ComplianceReviewLogForm
+    template_name = "trust/compliance_review_form.html"
+    success_url = reverse_lazy("trust:compliance_review_log")
+
+    def get_queryset(self):
+        return ComplianceReviewLog.objects.filter(firm=self.request.user.firm)
+
+    def form_valid(self, form):
+        form.instance.reviewed_by = self.request.user
+        form.instance.reviewed_on = timezone.now()
+        return super().form_valid(form)
+
+
+class Section19ComplianceReviewListView(StaffRequiredMixin, ListView):
+    model = Section19ComplianceReview
+    template_name = "trust/section19_review_list.html"
+    context_object_name = "section19_reviews"
+    paginate_by = 25
+
+    def get_queryset(self):
+        return (
+            Section19ComplianceReview.objects
+            .filter(firm=self.request.user.firm)
+            .select_related("reviewed_by")
+            .order_by("-review_period_end", "-created_at")
+        )
+
+
+class Section19ComplianceReviewCreateView(StaffRequiredMixin, CreateView):
+    model = Section19ComplianceReview
+    form_class = Section19ComplianceReviewForm
+    template_name = "trust/section19_review_form.html"
+    success_url = reverse_lazy("trust:periodic_compliance_review_list")
+
+    def get_initial(self):
+        initial = super().get_initial()
+        today = timezone.localdate()
+
+        if today.month >= 4:
+            trust_year_start = today.replace(month=4, day=1)
+            trust_year_end = today.replace(year=today.year + 1, month=3, day=31)
+        else:
+            trust_year_start = today.replace(year=today.year - 1, month=4, day=1)
+            trust_year_end = today.replace(month=3, day=31)
+
+        initial["review_period_start"] = trust_year_start
+        initial["review_period_end"] = trust_year_end
+        return initial
+
+    def form_valid(self, form):
+        form.instance.firm = self.request.user.firm
+        form.instance.reviewed_by = self.request.user
+        form.instance.reviewed_on = timezone.now()
+        return super().form_valid(form)
+
+
+class Section19ComplianceReviewUpdateView(StaffRequiredMixin, UpdateView):
+    model = Section19ComplianceReview
+    form_class = Section19ComplianceReviewForm
+    template_name = "trust/section19_review_form.html"
+    success_url = reverse_lazy("trust:periodic_compliance_review_list")
+
+    def get_queryset(self):
+        return Section19ComplianceReview.objects.filter(firm=self.request.user.firm)
+
+    def form_valid(self, form):
+        form.instance.reviewed_by = self.request.user
+        form.instance.reviewed_on = timezone.now()
+        return super().form_valid(form)
+
+
+class AnnualTrustComplianceRecordListView(StaffRequiredMixin, ListView):
+    model = AnnualTrustComplianceRecord
+    template_name = "trust/annual_trust_compliance_list.html"
+    context_object_name = "annual_records"
+    paginate_by = 25
+
+    def get_queryset(self):
+        return (
+            AnnualTrustComplianceRecord.objects
+            .filter(firm=self.request.user.firm)
+            .select_related("reviewed_by")
+            .order_by("-trust_year_end", "-created_at")
+        )
+
+
+class AnnualTrustComplianceRecordCreateView(StaffRequiredMixin, CreateView):
+    model = AnnualTrustComplianceRecord
+    form_class = AnnualTrustComplianceRecordForm
+    template_name = "trust/annual_trust_compliance_form.html"
+    success_url = reverse_lazy("trust:annual_compliance_list")
+
+    def get_initial(self):
+        initial = super().get_initial()
+        today = timezone.localdate()
+
+        if today.month >= 4:
+            trust_year_end = today.replace(month=3, day=31)
+        else:
+            trust_year_end = today.replace(year=today.year - 1, month=3, day=31)
+
+        trust_year_start = trust_year_end.replace(year=trust_year_end.year - 1) + timezone.timedelta(days=1)
+
+        initial["trust_year_start"] = trust_year_start
+        initial["trust_year_end"] = trust_year_end
+        return initial
+
+    def form_valid(self, form):
+        form.instance.firm = self.request.user.firm
+        form.instance.reviewed_by = self.request.user
+        form.instance.reviewed_on = timezone.now()
+        return super().form_valid(form)
+
+
+class AnnualTrustComplianceRecordUpdateView(StaffRequiredMixin, UpdateView):
+    model = AnnualTrustComplianceRecord
+    form_class = AnnualTrustComplianceRecordForm
+    template_name = "trust/annual_trust_compliance_form.html"
+    success_url = reverse_lazy("trust:annual_compliance_list")
+
+    def get_queryset(self):
+        return AnnualTrustComplianceRecord.objects.filter(firm=self.request.user.firm)
+
+    def form_valid(self, form):
+        form.instance.reviewed_by = self.request.user
+        form.instance.reviewed_on = timezone.now()
+        return super().form_valid(form)
+
+
+class ComplianceReportView(StaffRequiredMixin, TemplateView):
+    template_name = "trust/compliance_report.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+
+        status = ComplianceService(self.request.user.firm).get_status()
+        alerts = status["alerts"]
+
+        alert_keys = [alert.alert_key for alert in alerts if getattr(alert, "alert_key", "")]
+        latest_reviews = {}
+
+        if alert_keys:
+            logs = (
+                ComplianceReviewLog.objects
+                .filter(firm=self.request.user.firm, alert_key__in=alert_keys)
+                .select_related("matter", "reviewed_by")
+                .order_by("alert_key", "-reviewed_on", "-created_at")
+            )
+
+            for log in logs:
+                if log.alert_key not in latest_reviews:
+                    latest_reviews[log.alert_key] = log
+
+        for alert in alerts:
+            alert.latest_review = latest_reviews.get(getattr(alert, "alert_key", ""))
+
+        context["compliance_status"] = status
+        context["alerts"] = alerts
+        context["review_logs"] = (
+            ComplianceReviewLog.objects
+            .filter(firm=self.request.user.firm)
+            .select_related("matter", "reviewed_by")
+            .order_by("-reviewed_on", "-created_at")[:100]
+        )
+        context["periodic_reviews"] = (
+            Section19ComplianceReview.objects
+            .filter(firm=self.request.user.firm)
+            .select_related("reviewed_by")
+            .order_by("-review_period_end", "-created_at")[:20]
+        )
+        context["annual_records"] = (
+            AnnualTrustComplianceRecord.objects
+            .filter(firm=self.request.user.firm)
+            .select_related("reviewed_by")
+            .order_by("-trust_year_end", "-created_at")[:20]
+        )
+        context["generated_on"] = timezone.now()
+        return context
+
+
+class ComplianceCentreView(StaffRequiredMixin, TemplateView):
+    template_name = "trust/compliance_centre.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        service = ComplianceService(self.request.user.firm)
+        status = service.get_status()
+        alerts = status["alerts"]
+
+        alert_keys = [alert.alert_key for alert in alerts if getattr(alert, "alert_key", "")]
+        latest_reviews = {}
+
+        if alert_keys:
+            logs = (
+                ComplianceReviewLog.objects
+                .filter(firm=self.request.user.firm, alert_key__in=alert_keys)
+                .select_related("matter", "reviewed_by")
+                .order_by("alert_key", "-reviewed_on", "-created_at")
+            )
+
+            for log in logs:
+                if log.alert_key not in latest_reviews:
+                    latest_reviews[log.alert_key] = log
+
+        for alert in alerts:
+            alert.latest_review = latest_reviews.get(getattr(alert, "alert_key", ""))
+
+        context["compliance_status"] = status
+        context["alerts"] = alerts
+        context["review_logs"] = (
+            ComplianceReviewLog.objects
+            .filter(firm=self.request.user.firm)
+            .select_related("matter", "reviewed_by")
+            .order_by("-reviewed_on", "-created_at")[:5]
+        )
+        return context

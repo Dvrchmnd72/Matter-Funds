@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Compliance Review Note{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1>Compliance Review Note</h1>
+    <p class="text-muted mb-0">Record the review outcome, action taken and follow-up date.</p>
+  </div>
+  <div>
+    <a href="{% url 'trust:compliance_centre' %}" class="btn btn-outline-secondary">Compliance Centre</a>
+    <a href="{% url 'trust:compliance_review_log' %}" class="btn btn-outline-primary">Review Log</a>
+  </div>
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    <form method="post">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+
+      <div class="row">
+        {% for field in form %}
+          <div class="col-md-6 mb-3">
+            <label class="form-label fw-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}
+              <div class="form-text">{{ field.help_text }}</div>
+            {% endif %}
+            {% for error in field.errors %}
+              <div class="text-danger small">{{ error }}</div>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save Review Note</button>
+      <a href="{% url 'trust:compliance_centre' %}" class="btn btn-outline-secondary">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

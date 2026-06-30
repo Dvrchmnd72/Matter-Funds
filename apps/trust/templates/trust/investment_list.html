@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Trust Investments – Matter Funds{% endblock %}
+{% block content %}
+<h1>Trust Investments</h1>
+
+<div class="alert alert-info">
+  Register of investments of trust money where the practice has or will have continuing control over the investment.
+</div>
+
+<div class="mb-3">
+  <a href="{% url 'trust:investment_create' %}" class="btn btn-primary">New Investment</a>
+  <a href="{% url 'trust:investment_pdf' %}" class="btn btn-outline-secondary">Export PDF</a>
+</div>
+
+<table class="table table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Person</th>
+      <th>Matter</th>
+      <th>Name Investment Held In</th>
+      <th>Institution</th>
+      <th>Investment</th>
+      <th>Amount</th>
+      <th>Source</th>
+      <th>Repaid</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for i in investments %}
+    <tr>
+      <td>{{ i.date_invested }}</td>
+      <td>{{ i.person_on_behalf }}</td>
+      <td>{% if i.matter %}{{ i.matter }}{% else %}—{% endif %}</td>
+      <td>{{ i.investment_held_name }}</td>
+      <td>{{ i.institution|default:"—" }}</td>
+      <td>{{ i.investment_type|default:i.investment_particulars|truncatechars:100 }}</td>
+      <td>${{ i.amount_invested }}</td>
+      <td>{{ i.get_source_of_investment_display }}</td>
+      <td>{% if i.repaid_on %}{{ i.repaid_on }}{% else %}—{% endif %}</td>
+      <td><a href="{% url 'trust:investment_detail' i.pk %}" class="btn btn-sm btn-outline-primary">Open</a></td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="10">No trust investments recorded.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

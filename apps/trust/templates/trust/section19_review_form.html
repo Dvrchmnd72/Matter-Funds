@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Periodic Trust Compliance Review{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1>Periodic Trust Compliance Review</h1>
+    <p class="text-muted mb-0">Record periodic trust compliance review coverage, findings and corrective actions.</p>
+  </div>
+  <div>
+    <a href="{% url 'trust:periodic_compliance_review_list' %}" class="btn btn-outline-secondary">Periodic Trust Reviews</a>
+    <a href="{% url 'trust:compliance_centre' %}" class="btn btn-outline-primary">Compliance Centre</a>
+  </div>
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    <form method="post">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+
+      <div class="row">
+        {% for field in form %}
+          <div class="col-md-6 mb-3">
+            <label class="form-label fw-semibold" for="{{ field.id_for_label }}">{{ field.label }}</label>
+            {{ field }}
+            {% if field.help_text %}
+              <div class="form-text">{{ field.help_text }}</div>
+            {% endif %}
+            {% for error in field.errors %}
+              <div class="text-danger small">{{ error }}</div>
+            {% endfor %}
+          </div>
+        {% endfor %}
+      </div>
+
+      <button type="submit" class="btn btn-primary">Save Periodic Trust Review</button>
+      <a href="{% url 'trust:periodic_compliance_review_list' %}" class="btn btn-outline-secondary">Cancel</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

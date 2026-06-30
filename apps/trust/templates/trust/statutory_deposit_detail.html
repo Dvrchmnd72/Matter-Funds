@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Statutory Deposit Record{% endblock %}
+{% block content %}
+<h1>Statutory Deposit Record</h1>
+
+<p>
+<a class="btn btn-outline-primary"
+href="{% url 'trust:statutory_deposit_update' object.pk %}">
+Edit
+</a>
+
+<a class="btn btn-secondary"
+href="{% url 'trust:statutory_deposit_list' %}">
+Back
+</a>
+</p>
+
+<table class="table">
+<tr><th>Trust Account</th><td>{{ object.trust_account }}</td></tr>
+<tr><th>Applicable Period End</th><td>{{ object.applicable_period_end }}</td></tr>
+<tr><th>ADI</th><td>{{ object.statutory_deposit_adi }}</td></tr>
+<tr><th>Account Reference</th><td>{{ object.statutory_deposit_account_reference }}</td></tr>
+<tr><th>Calculated On</th><td>{{ object.calculated_on }}</td></tr>
+<tr><th>Required Amount</th><td>${{ object.required_amount }}</td></tr>
+<tr><th>Currently Held</th><td>${{ object.amount_currently_held }}</td></tr>
+<tr><th>Adjustment Required</th><td>${{ object.adjustment_required }}</td></tr>
+<tr><th>Adjustment Due</th><td>{{ object.adjustment_due_date }}</td></tr>
+<tr><th>Adjustment Made</th><td>{{ object.adjustment_made_on }}</td></tr>
+<tr><th>Next Review</th><td>{{ object.next_review_due_on }}</td></tr>
+<tr><th>Notes</th><td>{{ object.calculation_notes|linebreaksbr }}</td></tr>
+<tr><th>Supporting Document</th>
+<td>
+{% if object.supporting_document %}
+<a href="{{ object.supporting_document.url }}">Attached</a>
+{% else %}
+Not Attached
+{% endif %}
+</td></tr>
+<tr><th>Law Society Determination</th>
+<td>
+{% if object.law_society_determination_document %}
+<a href="{{ object.law_society_determination_document.url }}">Attached</a>
+{% else %}
+Not Attached
+{% endif %}
+</td></tr>
+</table>
+
+{% endblock %}

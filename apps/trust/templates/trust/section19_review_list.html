@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Periodic Trust Compliance Reviews{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1>Periodic Trust Compliance Reviews</h1>
+    <p class="text-muted mb-0">Periodic principal/examiner-readiness review records for trust compliance controls.</p>
+  </div>
+  <div>
+    <a href="{% url 'trust:compliance_centre' %}" class="btn btn-outline-secondary">Compliance Centre</a>
+    <a href="{% url 'trust:periodic_compliance_review_create' %}" class="btn btn-primary">New Periodic Trust Review</a>
+  </div>
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    {% if section19_reviews %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Period</th>
+            <th>Status</th>
+            <th>Reviewed By</th>
+            <th>Reviewed On</th>
+            <th>Corrective Action Summary</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for review in section19_reviews %}
+            <tr>
+              <td>{{ review.review_period_start }} to {{ review.review_period_end }}</td>
+              <td>{{ review.get_status_display }}</td>
+              <td>{{ review.reviewed_by|default:"-" }}</td>
+              <td>{{ review.reviewed_on|date:"d M Y H:i"|default:"-" }}</td>
+              <td>{{ review.corrective_action_summary|truncatechars:120|default:"-" }}</td>
+              <td>
+                <a href="{% url 'trust:periodic_compliance_review_update' review.pk %}" class="btn btn-sm btn-outline-primary">Edit</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="alert alert-info mb-0">No periodic trust compliance review records have been created yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

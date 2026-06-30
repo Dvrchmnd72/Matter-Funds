@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Powers & Estates – Matter Funds{% endblock %}
+{% block content %}
+<h1>Powers & Estates</h1>
+
+<div class="alert alert-info">
+  Register of powers and estates where the practice or an associate is acting or entitled to act in relation to trust money.
+</div>
+
+<div class="mb-3">
+  <a href="{% url 'trust:power_money_create' %}" class="btn btn-primary">New Power / Estate</a>
+  <a href="{% url 'trust:power_money_pdf' %}" class="btn btn-outline-secondary">Export PDF</a>
+</div>
+
+<table class="table table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Date of Power</th>
+      <th>Type</th>
+      <th>Donor / Deceased</th>
+      <th>Matter</th>
+      <th>Description</th>
+      <th>Date of Death</th>
+      <th>Responsible Solicitor</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in power_entries %}
+    <tr>
+      <td>{% if e.power_date %}{{ e.power_date }}{% else %}—{% endif %}</td>
+      <td>{{ e.get_entry_type_display }}</td>
+      <td>{% if e.deceased_name %}{{ e.deceased_name }}{% elif e.donor %}{{ e.donor }}{% else %}{{ e.client }}{% endif %}</td>
+      <td>{% if e.matter %}{{ e.matter }}{% else %}{{ e.matter_reference }}{% endif %}</td>
+      <td>{{ e.description|truncatechars:120 }}</td>
+      <td>{% if e.date_of_death %}{{ e.date_of_death }}{% else %}—{% endif %}</td>
+      <td>{{ e.responsible_solicitor }}</td>
+      <td><a href="{% url 'trust:power_money_detail' e.pk %}" class="btn btn-sm btn-outline-primary">Open</a></td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="8">No powers or estates recorded.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

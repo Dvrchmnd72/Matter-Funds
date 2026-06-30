@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Annual Trust Compliance{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h1>Annual Trust Compliance</h1>
+    <p class="text-muted mb-0">Trust-year records for annual lodgement and external examiner readiness.</p>
+  </div>
+  <div>
+    <a href="{% url 'trust:compliance_centre' %}" class="btn btn-outline-secondary">Compliance Centre</a>
+    <a href="{% url 'trust:annual_compliance_create' %}" class="btn btn-primary">New Annual Record</a>
+  </div>
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    {% if annual_records %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Trust Year</th>
+            <th>Status</th>
+            <th>Part A</th>
+            <th>External Examiner</th>
+            <th>EER Lodged</th>
+            <th>Reviewed By</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for record in annual_records %}
+            <tr>
+              <td>{{ record.trust_year_start }} to {{ record.trust_year_end }}</td>
+              <td>{{ record.get_status_display }}</td>
+              <td>{{ record.part_a_completed_on|default:"-" }}</td>
+              <td>
+                {% if record.external_examiner_required %}
+                  Required{% if record.external_examiner_name %}: {{ record.external_examiner_name }}{% endif %}
+                {% else %}
+                  Not marked required
+                {% endif %}
+              </td>
+              <td>{{ record.external_examiner_report_lodged_on|default:"-" }}</td>
+              <td>{{ record.reviewed_by|default:"-" }}</td>
+              <td>
+                <a href="{% url 'trust:annual_compliance_update' record.pk %}" class="btn btn-sm btn-outline-primary">Edit</a>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="alert alert-info mb-0">No annual trust compliance records have been created yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

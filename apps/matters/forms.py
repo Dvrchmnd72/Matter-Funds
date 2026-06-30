@@ -8,7 +8,7 @@ from apps.trust.models import MatterLedger
 class MatterForm(forms.ModelForm):
     class Meta:
         model = Matter
-        fields = ['firm', 'file_number', 'description', 'client', 'responsible_lawyer', 'status', 'opened_on', 'closed_on']
+        fields = ['firm', 'file_number', 'description', 'client', 'responsible_lawyer', 'status', 'date_instructions_received', 'regulated_property_location', 'opened_on', 'closed_on']
         widgets = {
             'opened_on': forms.DateInput(attrs={'type': 'date'}),
             'closed_on': forms.DateInput(attrs={'type': 'date'}),

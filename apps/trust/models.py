@@ -15,8 +15,8 @@ def _month_end_for(date_value):
     return datetime.date(
         date_value.year,
         date_value.month,
-        calendar.monthrange(date_value.year, date_value.month)[1],
-    )
+        calendar.monthrange(date_value.year, date_value.month)[1]
+)
 
 
 def _is_month_end(date_value):
@@ -38,13 +38,13 @@ class TrustAccount(models.Model):
     law_society_opening_notice_sent_on = models.DateField(
         null=True,
         blank=True,
-        help_text='Optional admin record: Rule 50(1) notice sent within 14 days of opening.',
-    )
+        help_text='Optional admin record: Rule 50(1) notice sent within 14 days of opening.'
+)
     law_society_closure_notice_sent_on = models.DateField(
         null=True,
         blank=True,
-        help_text='Optional admin record: Rule 50(3) notice sent within 14 days of closure.',
-    )
+        help_text='Optional admin record: Rule 50(3) notice sent within 14 days of closure.'
+)
 
     next_receipt_number = models.PositiveIntegerField(default=1)
     next_payment_number = models.PositiveIntegerField(default=1)
@@ -177,7 +177,7 @@ class ControlledMoneyReceipt(models.Model):
     made_out_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='controlled_money_receipts_made')
     is_cancelled = models.BooleanField(default=False)
     not_delivered = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         ordering = ['receipt_number']
@@ -221,14 +221,14 @@ class ControlledMoneyWithdrawal(models.Model):
     authorised_by = models.CharField(max_length=500)
     supporting_authority = models.FileField(upload_to='controlled_money/authorities/', null=True, blank=True)
     included_in_monthly_statement = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(
                 fields=['controlled_money_account', 'transaction_number'],
-                name='unique_cma_withdrawal_transaction_number_per_account',
-            )
+                name='unique_cma_withdrawal_transaction_number_per_account'
+)
         ]
 
     def clean(self):
@@ -244,8 +244,8 @@ class ControlledMoneyWithdrawal(models.Model):
         if self.controlled_money_account_id and self.transaction_number:
             duplicate_qs = type(self).objects.filter(
                 controlled_money_account_id=self.controlled_money_account_id,
-                transaction_number=self.transaction_number,
-            )
+                transaction_number=self.transaction_number
+)
             if self.pk:
                 duplicate_qs = duplicate_qs.exclude(pk=self.pk)
             if duplicate_qs.exists():
@@ -282,7 +282,7 @@ class ControlledMoneyMonthlyStatement(models.Model):
     review_note = models.TextField(blank=True)
     pdf = models.FileField(upload_to='controlled_money/monthly-statements/', null=True, blank=True)
     sha256_hash = models.CharField(max_length=64, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['firm', 'period_end'], name='unique_cma_monthly_statement_per_firm')]
@@ -290,6 +290,225 @@ class ControlledMoneyMonthlyStatement(models.Model):
     @property
     def due_date(self):
         return add_nsw_working_days(self.period_end, 15)
+
+
+class AnnualTrustComplianceRecord(models.Model):
+    STATUS_NOT_STARTED = 'not_started'
+    STATUS_IN_PROGRESS = 'in_progress'
+    STATUS_COMPLETED = 'completed'
+    STATUS_REQUIRES_ACTION = 'requires_action'
+
+    STATUS_CHOICES = [
+        (STATUS_NOT_STARTED, 'Not started'),
+        (STATUS_IN_PROGRESS, 'In progress'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_REQUIRES_ACTION, 'Requires action'),
+    ]
+
+    firm = models.ForeignKey(
+        'firms.Firm',
+        on_delete=models.PROTECT,
+        related_name='annual_trust_compliance_records'
+)
+
+    trust_year_start = models.DateField()
+    trust_year_end = models.DateField()
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_IN_PROGRESS)
+
+    part_a_completed_on = models.DateField(null=True, blank=True)
+    part_b_required = models.BooleanField(default=False)
+    part_b_completed_on = models.DateField(null=True, blank=True)
+
+    external_examiner_required = models.BooleanField(default=False)
+    external_examiner_name = models.CharField(max_length=255, blank=True, default='')
+    external_examiner_report_lodged_on = models.DateField(null=True, blank=True)
+
+    bank_reconciliation_31_march = models.FileField(upload_to='annual_trust_compliance/', null=True, blank=True)
+    trial_balance_31_march = models.FileField(upload_to='annual_trust_compliance/', null=True, blank=True)
+    bank_statement_31_march = models.FileField(upload_to='annual_trust_compliance/', null=True, blank=True)
+
+    overdrawn_ledgers_reviewed = models.BooleanField(default=False)
+    controlled_money_listing_reviewed = models.BooleanField(default=False)
+    investment_money_listing_reviewed = models.BooleanField(default=False)
+
+    notes = models.TextField(blank=True, default='')
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='annual_trust_compliance_reviews_completed'
+)
+    reviewed_on = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Annual Trust Compliance Record'
+        verbose_name_plural = 'Annual Trust Compliance Records'
+        ordering = ['-trust_year_end', '-created_at']
+        indexes = [
+            models.Index(fields=['firm', 'trust_year_end']),
+            models.Index(fields=['firm', 'status']),
+        ]
+
+    def __str__(self):
+        return f"Annual trust compliance {self.trust_year_start} to {self.trust_year_end}"
+
+
+class Section19ComplianceReview(models.Model):
+    STATUS_NOT_STARTED = 'not_started'
+    STATUS_IN_PROGRESS = 'in_progress'
+    STATUS_COMPLETED = 'completed'
+    STATUS_REQUIRES_ACTION = 'requires_action'
+
+    STATUS_CHOICES = [
+        (STATUS_NOT_STARTED, 'Not started'),
+        (STATUS_IN_PROGRESS, 'In progress'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_REQUIRES_ACTION, 'Requires action'),
+    ]
+
+    firm = models.ForeignKey(
+        'firms.Firm',
+        on_delete=models.PROTECT,
+        related_name='section19_reviews'
+)
+
+    review_period_start = models.DateField()
+    review_period_end = models.DateField()
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_IN_PROGRESS)
+
+    debit_balances_reviewed = models.BooleanField(default=False)
+    debit_balances_notes = models.TextField(blank=True, default='')
+
+    old_balances_reviewed = models.BooleanField(default=False)
+    old_balances_notes = models.TextField(blank=True, default='')
+
+    reconciliations_reviewed = models.BooleanField(default=False)
+    reconciliations_notes = models.TextField(blank=True, default='')
+
+    unidentified_money_reviewed = models.BooleanField(default=False)
+    unidentified_money_notes = models.TextField(blank=True, default='')
+
+    controlled_money_reviewed = models.BooleanField(default=False)
+    controlled_money_notes = models.TextField(blank=True, default='')
+
+    written_directions_reviewed = models.BooleanField(default=False)
+    written_directions_notes = models.TextField(blank=True, default='')
+
+    trust_investments_reviewed = models.BooleanField(default=False)
+    trust_investments_notes = models.TextField(blank=True, default='')
+
+    statutory_deposits_reviewed = models.BooleanField(default=False)
+    statutory_deposits_notes = models.TextField(blank=True, default='')
+
+    source_documents_reviewed = models.BooleanField(default=False)
+    source_documents_notes = models.TextField(blank=True, default='')
+
+    corrective_action_summary = models.TextField(blank=True, default='')
+
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='section19_reviews_completed'
+)
+    reviewed_on = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Periodic Trust Compliance Review'
+        verbose_name_plural = 'Periodic Trust Compliance Reviews'
+        ordering = ['-review_period_end', '-created_at']
+        indexes = [
+            models.Index(fields=['firm', 'status']),
+            models.Index(fields=['firm', 'review_period_end']),
+        ]
+
+    def __str__(self):
+        return f"Periodic trust compliance review {self.review_period_start} to {self.review_period_end}"
+
+
+class ComplianceReviewLog(models.Model):
+    STATUS_OPEN = 'open'
+    STATUS_REVIEWED = 'reviewed'
+    STATUS_RESOLVED = 'resolved'
+    STATUS_NOT_APPLICABLE = 'not_applicable'
+    STATUS_FOLLOW_UP = 'follow_up_required'
+
+    STATUS_CHOICES = [
+        (STATUS_OPEN, 'Open'),
+        (STATUS_REVIEWED, 'Reviewed'),
+        (STATUS_RESOLVED, 'Resolved'),
+        (STATUS_NOT_APPLICABLE, 'Not applicable'),
+        (STATUS_FOLLOW_UP, 'Follow-up required'),
+    ]
+
+    SEVERITY_ACTION = 'Action Required'
+    SEVERITY_REVIEW = 'Review Required'
+    SEVERITY_REMINDER = 'Reminder'
+    SEVERITY_INFORMATION = 'Information'
+
+    SEVERITY_CHOICES = [
+        (SEVERITY_ACTION, 'Action Required'),
+        (SEVERITY_REVIEW, 'Review Required'),
+        (SEVERITY_REMINDER, 'Reminder'),
+        (SEVERITY_INFORMATION, 'Information'),
+    ]
+
+    firm = models.ForeignKey(
+        'firms.Firm',
+        on_delete=models.PROTECT,
+        related_name='compliance_review_logs'
+)
+    matter = models.ForeignKey(
+        'matters.Matter',
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='compliance_review_logs'
+)
+
+    alert_key = models.CharField(max_length=255, blank=True, default='')
+    severity = models.CharField(max_length=30, choices=SEVERITY_CHOICES, default=SEVERITY_REVIEW)
+    category = models.CharField(max_length=120)
+    title = models.CharField(max_length=255)
+    source_url = models.CharField(max_length=500, blank=True, default='')
+
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_REVIEWED)
+    review_note = models.TextField(blank=True, default='')
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='compliance_reviews_completed'
+)
+    reviewed_on = models.DateTimeField(null=True, blank=True)
+    next_review_on = models.DateField(null=True, blank=True)
+
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Compliance Review Log'
+        verbose_name_plural = 'Compliance Review Logs'
+        ordering = ['-reviewed_on', '-created_at']
+        indexes = [
+            models.Index(fields=['firm', 'status']),
+            models.Index(fields=['firm', 'category']),
+            models.Index(fields=['firm', 'next_review_on']),
+            models.Index(fields=['alert_key']),
+        ]
+
+    def __str__(self):
+        return f"{self.category} - {self.title} ({self.get_status_display()})"
 
 
 class AuthorisedSignatory(models.Model):
@@ -310,8 +529,8 @@ class AuthorisedSignatory(models.Model):
     trust_account = models.ForeignKey(
         TrustAccount,
         on_delete=models.CASCADE,
-        related_name='authorised_signatories',
-    )
+        related_name='authorised_signatories'
+)
     name = models.CharField(max_length=255)
     address = models.TextField(blank=True, default='')
     email = models.EmailField(blank=True)
@@ -327,7 +546,14 @@ class AuthorisedSignatory(models.Model):
     is_active = models.BooleanField(default=True)
 
     notes = models.TextField(blank=True, default='')
-    created_at = models.DateTimeField(auto_now_add=True)
+
+    last_reviewed_on = models.DateField(null=True, blank=True)
+    next_review_due_on = models.DateField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='authorised_signatory_reviews')
+    reviewed_on = models.DateField(null=True, blank=True)
+    review_notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(default=timezone.now)
+
 
     class Meta:
         verbose_name = 'Authorised Signatory'
@@ -341,6 +567,20 @@ class AuthorisedSignatory(models.Model):
     def __str__(self):
         return f"{self.name} - {self.trust_account}"
 
+    @property
+    def review_status(self):
+        from django.utils import timezone
+        from datetime import timedelta
+
+        if not self.next_review_due_on:
+            return 'Not set'
+        today = timezone.localdate()
+        if self.next_review_due_on < today:
+            return 'Overdue'
+        if self.next_review_due_on <= today + timedelta(days=30):
+            return 'Due soon'
+        return 'Current'
+
     def clean(self):
         errors = {}
         if self.authorised_to and self.authorised_from and self.authorised_to < self.authorised_from:
@@ -353,7 +593,6 @@ class AuthorisedSignatory(models.Model):
             errors['authorised_trust_cheques'] = 'Select at least one authorisation type.'
         if errors:
             raise ValidationError(errors)
-
 
 
 class MatterLedger(models.Model):
@@ -446,7 +685,7 @@ class TrustAccountingPeriod(models.Model):
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_OPEN)
     locked_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='trust_periods_locked')
     locked_on = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
@@ -584,7 +823,6 @@ class DepositRecord(models.Model):
         return f"{self.get_deposit_type_display()} #{self.deposit_number} - {self.deposit_date}"
 
 
-
 class Payment(models.Model):
     PAYMENT_METHOD_CHOICES = [
         ('cheque', 'Cheque'),
@@ -633,7 +871,6 @@ class TrustJournal(models.Model):
     journal_out_txn = models.OneToOneField(TrustTransaction, on_delete=models.PROTECT, null=True, blank=True, related_name='journal_as_out')
     journal_in_txn = models.OneToOneField(TrustTransaction, on_delete=models.PROTECT, null=True, blank=True, related_name='journal_as_in')
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='trust_journals')
-    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name = 'Trust Journal'
@@ -657,7 +894,7 @@ class WrittenDirection(models.Model):
     signed_on = models.DateField()
     document = models.FileField(upload_to='trust/directions/')
     linked_transaction = models.ForeignKey(TrustTransaction, on_delete=models.PROTECT, null=True, blank=True, related_name='written_directions')
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         verbose_name = 'Written Direction'
@@ -668,35 +905,254 @@ class WrittenDirection(models.Model):
 
 
 class TransitMoneyEntry(models.Model):
+    client = models.ForeignKey('clients.Client', on_delete=models.PROTECT, null=True, blank=True, related_name='transit_money_entries')
+    matter = models.ForeignKey('matters.Matter', on_delete=models.PROTECT, null=True, blank=True, related_name='transit_money_entries')
     received_on = models.DateField()
     payor = models.CharField(max_length=255)
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     to_be_paid_to = models.CharField(max_length=255)
     paid_on = models.DateField(null=True, blank=True)
+    purpose = models.TextField(blank=True, default='')
+    instructions_document = models.FileField(upload_to='trust/transit-money/instructions/', null=True, blank=True)
+    supporting_document = models.FileField(upload_to='trust/transit-money/supporting/', null=True, blank=True)
     notes = models.TextField(blank=True)
 
     class Meta:
         verbose_name = 'Transit Money Entry'
         verbose_name_plural = 'Transit Money Entries'
+        ordering = ['-received_on']
+
+    @property
+    def status(self):
+        return 'Completed' if self.paid_on else 'Pending'
 
     def __str__(self):
         return f"Transit ${self.amount} from {self.payor} to {self.to_be_paid_to}"
 
 
+class StatutoryDepositRecord(models.Model):
+    trust_account = models.ForeignKey('trust.TrustAccount', on_delete=models.PROTECT, related_name='statutory_deposit_records')
+    applicable_period_end = models.DateField()
+    statutory_deposit_adi = models.CharField(max_length=255, blank=True, default='')
+    statutory_deposit_account_reference = models.CharField(max_length=255, blank=True, default='')
+    calculated_on = models.DateField(null=True, blank=True)
+    required_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    amount_currently_held = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    adjustment_required = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    adjustment_due_date = models.DateField(null=True, blank=True)
+    adjustment_made_on = models.DateField(null=True, blank=True)
+    calculation_notes = models.TextField(blank=True, default='')
+    supporting_document = models.FileField(upload_to='trust/statutory-deposits/supporting/', null=True, blank=True)
+    law_society_determination_document = models.FileField(upload_to='trust/statutory-deposits/law-society/', null=True, blank=True)
+    next_review_due_on = models.DateField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='statutory_deposit_record_reviews')
+    reviewed_on = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = 'Statutory Deposit Record'
+        verbose_name_plural = 'Statutory Deposit Records'
+        ordering = ['-applicable_period_end', 'trust_account']
+
+    @property
+    def status_label(self):
+        if self.adjustment_required and self.adjustment_required != 0 and not self.adjustment_made_on:
+            return 'Adjustment Required'
+        if self.next_review_due_on and self.next_review_due_on < timezone.localdate():
+            return 'Review Due'
+        return 'Up to Date'
+
+    def __str__(self):
+        return f"Statutory deposit {self.trust_account} - {self.applicable_period_end}"
+
+
+class TrustInvestment(models.Model):
+    SOURCE_GENERAL_TRUST = 'general_trust'
+    SOURCE_CONTROLLED_MONEY = 'controlled_money'
+    SOURCE_TRANSIT_MONEY = 'transit_money'
+    SOURCE_POWER_MONEY = 'power_money'
+    SOURCE_OTHER = 'other'
+
+    SOURCE_CHOICES = [
+        (SOURCE_GENERAL_TRUST, 'General Trust Account'),
+        (SOURCE_CONTROLLED_MONEY, 'Controlled Money Account'),
+        (SOURCE_TRANSIT_MONEY, 'Transit Money'),
+        (SOURCE_POWER_MONEY, 'Power Money'),
+        (SOURCE_OTHER, 'Other'),
+    ]
+
+    client = models.ForeignKey('clients.Client', on_delete=models.PROTECT, null=True, blank=True, related_name='trust_investments')
+    matter = models.ForeignKey('matters.Matter', on_delete=models.PROTECT, null=True, blank=True, related_name='trust_investments')
+    person_on_behalf = models.CharField(max_length=255)
+    person_address = models.TextField(blank=True, default='')
+    investment_held_name = models.CharField(max_length=255, help_text='Name in which investment is held')
+    institution = models.CharField(max_length=255, blank=True, default='')
+    investment_type = models.CharField(max_length=255, blank=True, default='')
+    investment_particulars = models.TextField(blank=True, default='')
+    amount_invested = models.DecimalField(max_digits=12, decimal_places=2)
+    date_invested = models.DateField()
+    maturity_due_on = models.DateField(null=True, blank=True)
+    source_of_investment = models.CharField(max_length=30, choices=SOURCE_CHOICES, default=SOURCE_GENERAL_TRUST)
+    source_reference = models.CharField(max_length=255, blank=True, default='')
+    trust_ledger_reference = models.CharField(max_length=255, blank=True, default='')
+    written_direction_reference = models.CharField(max_length=255, blank=True, default='')
+    written_direction_date = models.DateField(null=True, blank=True)
+    cheque_or_eft_reference = models.CharField(max_length=255, blank=True, default='')
+    investment_terms = models.TextField(blank=True, default='')
+    document_identifier = models.CharField(max_length=255, blank=True, default='')
+    evidence_document = models.FileField(upload_to='trust/investments/evidence/', null=True, blank=True)
+    written_direction_document = models.FileField(upload_to='trust/investments/directions/', null=True, blank=True)
+    interest_details = models.TextField(blank=True, default='')
+    maturity_repayment_details = models.TextField(blank=True, default='')
+    repaid_on = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = 'Trust Investment'
+        verbose_name_plural = 'Trust Investments'
+        ordering = ['-date_invested', 'person_on_behalf']
+
+    def __str__(self):
+        return f"{self.person_on_behalf} - {self.investment_held_name} - ${self.amount_invested}"
+
+
 class PowerMoneyEntry(models.Model):
-    power_instrument = models.FileField(upload_to='trust/power/')
-    donor = models.CharField(max_length=255)
-    donee = models.CharField(max_length=255)
-    amount_held = models.DecimalField(max_digits=12, decimal_places=2)
+    ENTRY_POWER = 'power'
+    ENTRY_ESTATE = 'estate'
+    ENTRY_GUARDIANSHIP = 'guardianship'
+    ENTRY_PROBATE = 'probate'
+    ENTRY_OTHER = 'other'
+
+    ENTRY_TYPE_CHOICES = [
+        (ENTRY_POWER, 'Power of attorney / authority'),
+        (ENTRY_ESTATE, 'Estate'),
+        (ENTRY_GUARDIANSHIP, 'Guardianship order'),
+        (ENTRY_PROBATE, 'Probate / administration'),
+        (ENTRY_OTHER, 'Other'),
+    ]
+
+    entry_type = models.CharField(max_length=30, choices=ENTRY_TYPE_CHOICES, default=ENTRY_POWER)
+    client = models.ForeignKey('clients.Client', on_delete=models.PROTECT, null=True, blank=True, related_name='power_money_entries')
+    matter = models.ForeignKey('matters.Matter', on_delete=models.PROTECT, null=True, blank=True, related_name='power_money_entries')
+    power_instrument = models.FileField(upload_to='trust/power/', null=True, blank=True)
+    authority_document = models.FileField(upload_to='trust/power/authorities/', null=True, blank=True)
+    donor = models.CharField(max_length=255, blank=True, default='')
+    donor_address = models.TextField(blank=True, default='')
+    donee = models.CharField(max_length=255, blank=True, default='')
+    power_date = models.DateField(null=True, blank=True)
+    deceased_name = models.CharField(max_length=255, blank=True, default='')
+    date_of_death = models.DateField(null=True, blank=True)
+    matter_reference = models.CharField(max_length=100, blank=True, default='')
+    description = models.TextField(blank=True, default='')
+    responsible_solicitor = models.CharField(max_length=255, blank=True, default='')
+    amount_held = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     notes = models.TextField(blank=True)
 
     class Meta:
-        verbose_name = 'Power Money Entry'
-        verbose_name_plural = 'Power Money Entries'
+        verbose_name = 'Power / Estate Register Entry'
+        verbose_name_plural = 'Powers & Estates Register'
+        ordering = ['-power_date', 'donor', 'deceased_name']
 
     def __str__(self):
-        return f"Power Money ${self.amount_held} \u2013 {self.donor} \u2192 {self.donee}"
+        subject = self.deceased_name or self.donor or self.client or 'Power/Estate'
+        return f"{subject} - {self.get_entry_type_display()}"
 
+
+class PowerMoneyDealing(models.Model):
+    power_entry = models.ForeignKey(PowerMoneyEntry, on_delete=models.PROTECT, related_name='dealings')
+    dealing_date = models.DateField()
+    description = models.TextField()
+    deposit = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    withdrawal = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    payee_or_source = models.CharField(max_length=255, blank=True, default='')
+    supporting_document = models.FileField(upload_to='trust/power/dealings/', null=True, blank=True)
+    notes = models.TextField(blank=True, default='')
+
+    class Meta:
+        verbose_name = 'Power / Estate Dealing'
+        verbose_name_plural = 'Power / Estate Dealings'
+        ordering = ['dealing_date', 'id']
+
+    def __str__(self):
+        return f"{self.power_entry} - {self.dealing_date}"
+
+
+class UnclaimedMoneyRecord(models.Model):
+    STATUS_UNDER_REVIEW = 'under_review'
+    STATUS_CLIENT_CONTACTED = 'client_contacted'
+    STATUS_RESOLVED = 'resolved'
+    STATUS_PAID_OUT = 'paid_out'
+    STATUS_TRANSFERRED = 'transferred'
+    STATUS_CLOSED = 'closed'
+
+    STATUS_CHOICES = [
+        (STATUS_UNDER_REVIEW, 'Under review'),
+        (STATUS_CLIENT_CONTACTED, 'Client contacted'),
+        (STATUS_RESOLVED, 'Resolved'),
+        (STATUS_PAID_OUT, 'Paid out'),
+        (STATUS_TRANSFERRED, 'Transferred / dealt with under statutory process'),
+        (STATUS_CLOSED, 'Closed'),
+    ]
+
+    firm = models.ForeignKey('firms.Firm', on_delete=models.PROTECT, related_name='unclaimed_money_records')
+    trust_account = models.ForeignKey(TrustAccount, on_delete=models.PROTECT, related_name='unclaimed_money_records')
+    matter_ledger = models.ForeignKey(MatterLedger, on_delete=models.PROTECT, related_name='unclaimed_money_records')
+
+    amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.00'))])
+    date_identified = models.DateField(default=timezone.localdate)
+    date_last_activity = models.DateField(null=True, blank=True)
+    date_funds_became_potentially_unclaimed = models.DateField(null=True, blank=True)
+
+    last_client_contact_date = models.DateField(null=True, blank=True)
+    contact_attempts = models.TextField(blank=True)
+    review_notes = models.TextField(blank=True)
+    proposed_action = models.TextField(blank=True)
+
+    status = models.CharField(max_length=30, choices=STATUS_CHOICES, default=STATUS_UNDER_REVIEW)
+    supporting_document = models.FileField(upload_to='trust/unclaimed-money/', null=True, blank=True)
+
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='unclaimed_money_reviews')
+    reviewed_on = models.DateField(null=True, blank=True)
+    resolved_on = models.DateField(null=True, blank=True)
+    resolution_notes = models.TextField(blank=True)
+
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='unclaimed_money_created')
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = 'Unclaimed Money Record'
+        verbose_name_plural = 'Unclaimed Money Records'
+        ordering = ['-date_identified', '-created_at']
+        indexes = [
+            models.Index(fields=['firm', 'status']),
+            models.Index(fields=['trust_account', 'status']),
+            models.Index(fields=['matter_ledger', 'status']),
+        ]
+
+    def __str__(self):
+        return f"Unclaimed money review - {self.matter_ledger} - ${self.amount}"
+
+    def clean(self):
+        errors = {}
+
+        if self.matter_ledger_id and self.trust_account_id:
+            if self.matter_ledger.trust_account_id != self.trust_account_id:
+                errors['matter_ledger'] = 'Matter ledger must belong to the selected trust account.'
+
+        if self.trust_account_id and self.firm_id:
+            if self.trust_account.firm_id != self.firm_id:
+                errors['trust_account'] = 'Trust account must belong to the selected firm.'
+
+        if self.amount is not None and self.amount < 0:
+            errors['amount'] = 'Amount cannot be negative.'
+
+        if self.resolved_on and self.date_identified and self.resolved_on < self.date_identified:
+            errors['resolved_on'] = 'Resolved date cannot be before the date identified.'
+
+        if errors:
+            raise ValidationError(errors)
 
 class MonthlyReconciliation(models.Model):
     trust_account = models.ForeignKey(TrustAccount, on_delete=models.PROTECT, related_name='reconciliations')
@@ -718,7 +1174,7 @@ class MonthlyReconciliation(models.Model):
     finalised_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='trust_reconciliations_finalised')
     finalised_on = models.DateTimeField(null=True, blank=True)
     bank_statement_pdf = models.FileField(upload_to='trust/recons/', null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         unique_together = [('trust_account', 'period_end')]
@@ -850,8 +1306,8 @@ class ReconciliationBankLine(models.Model):
     reconciliation = models.ForeignKey(
         MonthlyReconciliation,
         on_delete=models.CASCADE,
-        related_name='bank_lines',
-    )
+        related_name='bank_lines'
+)
     line_date = models.DateField()
     line_type = models.CharField(max_length=10, choices=LINE_TYPE_CHOICES)
     amount = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal('0.01'))])
@@ -861,30 +1317,30 @@ class ReconciliationBankLine(models.Model):
         max_length=60,
         choices=ADJUSTMENT_CATEGORY_CHOICES,
         blank=True,
-        default='',
-    )
+        default=''
+)
     carry_forward_until_cleared = models.BooleanField(default=False)
     cleared_by_transaction = models.ForeignKey(
         TrustTransaction,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
-        related_name='clears_reconciliation_adjustments',
-    )
+        related_name='clears_reconciliation_adjustments'
+)
     cleared_in_reconciliation = models.ForeignKey(
         MonthlyReconciliation,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
-        related_name='cleared_bank_line_adjustments',
-    )
+        related_name='cleared_bank_line_adjustments'
+)
     cleared_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
         null=True,
         blank=True,
-        related_name='reconciliation_bank_lines_cleared',
-    )
+        related_name='reconciliation_bank_lines_cleared'
+)
     cleared_at = models.DateTimeField(null=True, blank=True)
     cleared_notes = models.TextField(blank=True, default='')
     matched_transaction = models.ForeignKey(
@@ -892,13 +1348,13 @@ class ReconciliationBankLine(models.Model):
         on_delete=models.PROTECT,
         null=True,
         blank=True,
-        related_name='authorised_adi_matches',
-    )
+        related_name='authorised_adi_matches'
+)
     notes = models.TextField(blank=True, default='')
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='reconciliation_bank_lines_created')
-    created_at = models.DateTimeField(auto_now_add=True)
     matched_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, related_name='reconciliation_bank_lines_matched')
     matched_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
 
     class Meta:
         verbose_name = 'Authorised ADI Statement Line'
@@ -941,7 +1397,6 @@ class ReconciliationBankLine(models.Model):
 
     def __str__(self):
         return f"{self.get_line_type_display()} ${self.amount} on {self.line_date}"
-
 
 
 class TrustMonthlyRecord(models.Model):
@@ -1011,7 +1466,6 @@ class Irregularity(models.Model):
     reported_to_law_society_on = models.DateField(null=True, blank=True)
     report_document = models.FileField(upload_to='trust/irregularities/', null=True, blank=True)
     resolution = models.TextField(blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

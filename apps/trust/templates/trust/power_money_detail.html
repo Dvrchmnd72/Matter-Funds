@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Power / Estate – Matter Funds{% endblock %}
+{% block content %}
+<h1>Powers & Estates Register Entry</h1>
+
+<p>
+  <a class="btn btn-outline-primary" href="{% url 'trust:power_money_update' entry.pk %}">Edit</a>
+  <a class="btn btn-outline-secondary" href="{% url 'trust:power_money_dealing_create' entry.pk %}">Add Dealing</a>
+  <a class="btn btn-secondary" href="{% url 'trust:power_money_list' %}">Back</a>
+</p>
+
+<table class="table">
+  <tr><th>Type</th><td>{{ entry.get_entry_type_display }}</td></tr>
+  <tr><th>Date of Power</th><td>{{ entry.power_date|default:"—" }}</td></tr>
+  <tr><th>Donor</th><td>{{ entry.donor }}</td></tr>
+  <tr><th>Donor Address</th><td>{{ entry.donor_address|linebreaksbr }}</td></tr>
+  <tr><th>Donee</th><td>{{ entry.donee }}</td></tr>
+  <tr><th>Deceased</th><td>{{ entry.deceased_name|default:"—" }}</td></tr>
+  <tr><th>Date of Death</th><td>{{ entry.date_of_death|default:"—" }}</td></tr>
+  <tr><th>Matter</th><td>{% if entry.matter %}{{ entry.matter }}{% else %}{{ entry.matter_reference }}{% endif %}</td></tr>
+  <tr><th>Description</th><td>{{ entry.description|linebreaksbr }}</td></tr>
+  <tr><th>Responsible Solicitor</th><td>{{ entry.responsible_solicitor }}</td></tr>
+  <tr><th>Power Instrument</th><td>{% if entry.power_instrument %}<a href="{{ entry.power_instrument.url }}" target="_blank">Attached</a>{% else %}— None{% endif %}</td></tr>
+  <tr><th>Authority Document</th><td>{% if entry.authority_document %}<a href="{{ entry.authority_document.url }}" target="_blank">Attached</a>{% else %}— None{% endif %}</td></tr>
+</table>
+
+<h2>Ledger-style Dealings</h2>
+<p class="text-muted">Record dealings with money under the power or estate, including supporting documents.</p>
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>Date</th>
+      <th>Description</th>
+      <th>Paid To / Received From</th>
+      <th>Deposit</th>
+      <th>Withdrawal</th>
+      <th>Running Balance</th>
+      <th>Document</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in dealing_rows %}
+    {% with d=row.dealing %}
+    <tr>
+      <td>{{ d.dealing_date }}</td>
+      <td>{{ d.description }}</td>
+      <td>{{ d.payee_or_source }}</td>
+      <td>${{ d.deposit }}</td>
+      <td>${{ d.withdrawal }}</td>
+      <td>${{ row.balance }}</td>
+      <td>{% if d.supporting_document %}<a href="{{ d.supporting_document.url }}" target="_blank">View</a>{% else %}—{% endif %}</td>
+    </tr>
+    {% endwith %}
+    {% empty %}
+    <tr><td colspan="7">No dealings recorded.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

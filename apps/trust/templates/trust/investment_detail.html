@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Trust Investment – Matter Funds{% endblock %}
+{% block content %}
+<h1>Trust Investment Record</h1>
+
+<p>
+  <a class="btn btn-outline-primary" href="{% url 'trust:investment_update' investment.pk %}">Edit</a>
+  <a class="btn btn-secondary" href="{% url 'trust:investment_list' %}">Back</a>
+</p>
+
+<table class="table">
+  <tr><th>Person on whose behalf investment is made</th><td>{{ investment.person_on_behalf }}</td></tr>
+  <tr><th>Address</th><td>{{ investment.person_address|linebreaksbr }}</td></tr>
+  <tr><th>Client</th><td>{{ investment.client|default:"—" }}</td></tr>
+  <tr><th>Matter</th><td>{{ investment.matter|default:"—" }}</td></tr>
+  <tr><th>Name Investment Held In</th><td>{{ investment.investment_held_name }}</td></tr>
+  <tr><th>Institution</th><td>{{ investment.institution }}</td></tr>
+  <tr><th>Investment type</th><td>{{ investment.investment_type }}</td></tr>
+  <tr><th>Investment particulars</th><td>{{ investment.investment_particulars|linebreaksbr }}</td></tr>
+  <tr><th>Amount invested</th><td>${{ investment.amount_invested }}</td></tr>
+  <tr><th>Date invested</th><td>{{ investment.date_invested }}</td></tr>
+  <tr><th>Source of investment</th><td>{{ investment.get_source_of_investment_display }}</td></tr>
+  <tr><th>Source reference</th><td>{{ investment.source_reference }}</td></tr>
+  <tr><th>Trust ledger reference</th><td>{{ investment.trust_ledger_reference }}</td></tr>
+  <tr><th>Written direction reference</th><td>{{ investment.written_direction_reference }}</td></tr>
+  <tr><th>Written direction date</th><td>{{ investment.written_direction_date|default:"—" }}</td></tr>
+  <tr><th>Cheque / EFT reference</th><td>{{ investment.cheque_or_eft_reference }}</td></tr>
+  <tr><th>Investment terms</th><td>{{ investment.investment_terms|linebreaksbr }}</td></tr>
+  <tr><th>Document identifier</th><td>{{ investment.document_identifier }}</td></tr>
+  <tr><th>Evidence document</th><td>{% if investment.evidence_document %}<a href="{{ investment.evidence_document.url }}" target="_blank">Attached</a>{% else %}Not Attached{% endif %}</td></tr>
+  <tr><th>Written direction document</th><td>{% if investment.written_direction_document %}<a href="{{ investment.written_direction_document.url }}" target="_blank">Attached</a>{% else %}Not Attached{% endif %}</td></tr>
+  <tr><th>Interest details</th><td>{{ investment.interest_details|linebreaksbr }}</td></tr>
+  <tr><th>Maturity / repayment details</th><td>{{ investment.maturity_repayment_details|linebreaksbr }}</td></tr>
+  <tr><th>Repaid on</th><td>{{ investment.repaid_on|default:"—" }}</td></tr>
+  <tr><th>Notes</th><td>{{ investment.notes|linebreaksbr }}</td></tr>
+</table>
+{% endblock %}

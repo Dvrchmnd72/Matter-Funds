@@ -19,6 +19,16 @@ class Matter(models.Model):
         on_delete=models.PROTECT,
     )
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='open')
+    date_instructions_received = models.DateField(
+        default=datetime.date.today,
+        help_text='Date instructions were first received for this matter.'
+    )
+    regulated_property_location = models.CharField(
+        max_length=255,
+        blank=True,
+        default='Principal Place of Practice',
+        help_text='Location of regulated property for the matter.'
+    )
     opened_on = models.DateField(default=datetime.date.today)
     closed_on = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

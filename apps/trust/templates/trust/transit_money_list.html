@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Transit Money – Matter Funds{% endblock %}
+{% block content %}
+<h1>Transit Money</h1>
+
+<div class="alert alert-info">
+  Transit money records retain brief particulars and supporting documents. If received in cash, money must first be deposited into the general trust account and receipted before being dealt with.
+</div>
+
+<div class="mb-3">
+  <a href="{% url 'trust:transit_money_create' %}" class="btn btn-primary">New Transit Money Entry</a>
+  <a href="{% url 'trust:transit_money_pdf' %}" class="btn btn-outline-secondary">Export PDF</a>
+</div>
+
+<p><strong>{{ pending_count }}</strong> pending transit money entr{{ pending_count|pluralize:"y,ies" }}.</p>
+
+<form method="get" class="mb-3">
+  <select name="status" class="form-select" style="max-width:220px; display:inline-block;">
+    <option value="all" {% if status_filter == "all" %}selected{% endif %}>All</option>
+    <option value="pending" {% if status_filter == "pending" %}selected{% endif %}>Pending only</option>
+    <option value="completed" {% if status_filter == "completed" %}selected{% endif %}>Completed only</option>
+  </select>
+  <button type="submit" class="btn btn-outline-primary">Apply</button>
+</form>
+
+<table class="table table-striped align-middle">
+  <thead>
+    <tr>
+      <th>Received</th>
+      <th>Client</th>
+      <th>Matter</th>
+      <th>Payor</th>
+      <th>Amount</th>
+      <th>To be paid/delivered to</th>
+      <th>Paid/Delivered</th>
+      <th>Documents</th>
+      <th>Status</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for e in transit_entries %}
+    <tr>
+      <td>{{ e.received_on }}</td>
+      <td>{% if e.client %}{{ e.client }}{% else %}—{% endif %}</td>
+      <td>{% if e.matter %}{{ e.matter }}{% else %}—{% endif %}</td>
+      <td>{{ e.payor }}</td>
+      <td>${{ e.amount }}</td>
+      <td>{{ e.to_be_paid_to }}</td>
+      <td>{% if e.paid_on %}{{ e.paid_on }}{% else %}—{% endif %}</td>
+      <td>
+        {% if e.instructions_document %}<a href="{{ e.instructions_document.url }}" target="_blank">Instructions</a>{% endif %}
+        {% if e.supporting_document %}<a href="{{ e.supporting_document.url }}" target="_blank">Supporting</a>{% endif %}
+        {% if not e.instructions_document and not e.supporting_document %}—{% endif %}
+      </td>
+      <td>{% if e.paid_on %}<span class="badge bg-success">Completed</span>{% else %}<span class="badge bg-warning text-dark">Pending</span>{% endif %}</td>
+      <td><a href="{% url 'trust:transit_money_update' e.pk %}" class="btn btn-sm btn-outline-primary">Edit</a></td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="10">No transit money entries recorded.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

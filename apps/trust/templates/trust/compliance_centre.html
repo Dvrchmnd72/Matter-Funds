@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}Trust Compliance Centre{% endblock %}
+
+{% block content %}
+<h1>Trust Compliance Centre</h1>
+<p class="text-muted">Live trust accounting alerts and review items.</p>
+
+<div class="mb-3 no-print">
+  <a href="{% url 'trust:compliance_review_log' %}" class="btn btn-outline-primary">View Review Log</a>
+  <a href="{% url 'trust:compliance_review_create' %}" class="btn btn-primary">Add Review Note</a>
+  <a href="{% url 'trust:compliance_report' %}" class="btn btn-outline-secondary">Compliance Report</a>
+  <a href="{% url 'trust:annual_compliance_list' %}" class="btn btn-outline-secondary">Annual Compliance</a>
+  <a href="{% url 'trust:periodic_compliance_review_list' %}" class="btn btn-outline-secondary">Periodic Trust Review</a>
+</div>
+
+<div class="card shadow-sm border-0 mb-4">
+  <div class="card-body">
+    <div class="row g-3 align-items-center">
+      <div class="col-md-4">
+        <div class="text-muted small">Overall Status</div>
+        <div class="fs-3 fw-bold">
+          {% if compliance_status.overall == "Good" %}
+            🟢 Good
+          {% elif compliance_status.overall == "Review Required" %}
+            🟠 Review Required
+          {% elif compliance_status.overall == "Action Required" %}
+            🔴 Action Required
+          {% else %}
+            🟡 Reminder
+          {% endif %}
+        </div>
+      </div>
+      <div class="col-md-2">
+        <div class="text-muted small">Action Required</div>
+        <div class="fs-4 fw-bold">{{ compliance_status.action_count }}</div>
+      </div>
+      <div class="col-md-2">
+        <div class="text-muted small">Reviews</div>
+        <div class="fs-4 fw-bold">{{ compliance_status.review_count }}</div>
+      </div>
+      <div class="col-md-2">
+        <div class="text-muted small">Reminders</div>
+        <div class="fs-4 fw-bold">{{ compliance_status.reminder_count }}</div>
+      </div>
+      <div class="col-md-2">
+        <div class="text-muted small">Last Checked</div>
+        <div class="fw-semibold">{{ compliance_status.last_checked|date:"d M Y H:i" }}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h5 class="card-title mb-1">Live Compliance Alerts</h5>
+        <p class="text-muted mb-0">
+          These are system-generated alerts based on trust accounting records, review logs, annual compliance records and supporting document status.
+        </p>
+      </div>
+    </div>
+
+    {% if alerts %}
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Severity</th>
+            <th>Category</th>
+            <th>Issue</th>
+            <th>Matter</th>
+            <th class="no-print">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for alert in alerts %}
+            <tr>
+              <td>{{ alert.severity }}</td>
+              <td>{{ alert.category }}</td>
+              <td>
+                <strong>{{ alert.title }}</strong><br>
+                <span class="text-muted">{{ alert.description }}</span>
+
+                {% if alert.latest_review %}
+                  <div class="mt-2 p-2 rounded bg-light border">
+                    <div class="small">
+                      <strong>Last reviewed:</strong>
+                      {{ alert.latest_review.reviewed_on|date:"d M Y H:i"|default:"-" }}
+                      by {{ alert.latest_review.reviewed_by|default:"-" }}
+                    </div>
+                    <div class="small">
+                      <strong>Status:</strong> {{ alert.latest_review.get_status_display }}
+                      {% if alert.latest_review.next_review_on %}
+                        | <strong>Next review:</strong> {{ alert.latest_review.next_review_on }}
+                      {% endif %}
+                    </div>
+                    {% if alert.latest_review.review_note %}
+                      <div class="small text-muted mt-1">
+                        {{ alert.latest_review.review_note|truncatechars:160 }}
+                      </div>
+                    {% endif %}
+                  </div>
+                {% endif %}
+              </td>
+              <td>{{ alert.matter|default:"—" }}</td>
+              <td class="no-print">
+                <div class="d-flex gap-2">
+                  {% if alert.action_url %}
+                    <a href="{{ alert.action_url }}" class="btn btn-sm btn-outline-primary">Open</a>
+                  {% endif %}
+                  <a
+                    href="{% url 'trust:compliance_review_create' %}?severity={{ alert.severity|urlencode }}&category={{ alert.category|urlencode }}&title={{ alert.title|urlencode }}&alert_key={{ alert.alert_key|urlencode }}&source_url={{ alert.action_url|urlencode }}{% if alert.matter %}&matter={{ alert.matter.pk }}{% endif %}"
+                    class="btn btn-sm btn-primary"
+                  >
+                    Record Review
+                  </a>
+                </div>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="alert alert-success mb-0">
+        <strong>No outstanding trust compliance issues detected.</strong><br>
+        <span>All monitored trust accounting controls are currently within expected parameters.</span>
+      </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card shadow-sm border-0 mt-4">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="card-title mb-0">Recent Review Notes</h5>
+      <a href="{% url 'trust:compliance_review_log' %}" class="btn btn-sm btn-outline-primary no-print">View All</a>
+    </div>
+
+    {% if review_logs %}
+      <table class="table mb-0">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Category</th>
+            <th>Issue</th>
+            <th>Status</th>
+            <th>Next Review</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for log in review_logs %}
+            <tr>
+              <td>{{ log.reviewed_on|date:"d M Y H:i"|default:"-" }}</td>
+              <td>{{ log.category }}</td>
+              <td>
+                <strong>{{ log.title }}</strong><br>
+                <span class="text-muted">{{ log.review_note|truncatechars:120 }}</span>
+              </td>
+              <td>{{ log.get_status_display }}</td>
+              <td>{{ log.next_review_on|default:"-" }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <div class="alert alert-info mb-0">No compliance review notes have been recorded yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

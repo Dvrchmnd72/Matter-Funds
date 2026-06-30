@@ -2,32 +2,33 @@
 {% load crispy_forms_tags %}
 {% block title %}Reports – Matter Funds{% endblock %}
 {% block content %}
-<h1 class="mb-4">Trust Reports</h1>
-<p class="text-muted">Live/user-generated reports. Select journal date ranges or a ledger reconciliation as-at date to generate reports on demand.</p>
+<h1 class="mb-4">Trust Accounting Reports</h1>
+<p class="text-muted">Generate core trust accounting records for internal review, reconciliation, examiner requests, and statutory record keeping.</p>
 {% for account in accounts %}
 <div class="card mb-4">
   <div class="card-header"><strong>{{ account.name }}</strong></div>
   <div class="card-body">
-    <h5>Journals (select date range)</h5>
+    <h5>Cash Books and Journals</h5>
+    <p class="text-muted small mb-2">Receipts cash book, payments cash book, transfer journal and cash book summary for the selected trust account and period.</p>
     <form method="get" action="{% url 'trust:receipts_journal_pdf' account.pk %}" class="row g-2 mb-2">
       <div class="col-auto"><input type="date" name="date_from" class="form-control form-control-sm" placeholder="From"></div>
       <div class="col-auto"><input type="date" name="date_to" class="form-control form-control-sm" placeholder="To"></div>
-      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Receipts Journal PDF</button></div>
+      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Receipts Cash Book PDF</button></div>
     </form>
     <form method="get" action="{% url 'trust:payments_journal_pdf' account.pk %}" class="row g-2 mb-2">
       <div class="col-auto"><input type="date" name="date_from" class="form-control form-control-sm" placeholder="From"></div>
       <div class="col-auto"><input type="date" name="date_to" class="form-control form-control-sm" placeholder="To"></div>
-      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Payments Journal PDF</button></div>
+      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Payments Cash Book PDF</button></div>
     </form>
     <form method="get" action="{% url 'trust:trust_transfer_journal_pdf' account.pk %}" class="row g-2 mb-2">
       <div class="col-auto"><input type="date" name="date_from" class="form-control form-control-sm" placeholder="From"></div>
       <div class="col-auto"><input type="date" name="date_to" class="form-control form-control-sm" placeholder="To"></div>
-      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Trust Transfer Journal PDF</button></div>
+      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Transfer Journal PDF</button></div>
     </form>
     <form method="get" action="{% url 'trust:trust_cash_book_summary_pdf' account.pk %}" class="row g-2 mb-2">
       <div class="col-auto"><input type="date" name="date_from" class="form-control form-control-sm" placeholder="From"></div>
       <div class="col-auto"><input type="date" name="date_to" class="form-control form-control-sm" placeholder="To"></div>
-      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Trust Cash Book Summary PDF</button></div>
+      <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-primary">Cash Book Summary PDF</button></div>
     </form>
     <h5 class="mt-3">Outstanding / Unpresented Cheques</h5>
     <p class="text-muted small mb-2">Review cheque payments issued but not yet presented on the authorised ADI statement.</p>
@@ -35,7 +36,7 @@
       <a href="{% url 'trust:outstanding_cheques_report' account.pk %}" class="btn btn-sm btn-outline-primary">Outstanding Cheques Report</a>
       <a href="{% url 'trust:outstanding_cheques_pdf' account.pk %}" class="btn btn-sm btn-outline-secondary">Outstanding Cheques PDF</a>
     </div>
-    <h5 class="mt-3">Ledger Reconciliation / Trial Balance – Rule 48(2)(b)</h5>
+    <h5 class="mt-3">Ledger Reconciliation / Trial Balance</h5>
     <form method="get" action="{% url 'trust:trial_balance_pdf' account.pk %}" class="row g-2 mb-2">
       <div class="col-auto"><label class="form-label form-label-sm" for="as-at-{{ account.pk }}">As at date</label></div>
       <div class="col-auto">
@@ -45,7 +46,7 @@
       <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-secondary">Ledger Reconciliation PDF</button></div>
     </form>
     <h5 class="mt-3">Examiner Pack (select year)</h5>
-    <p class="text-muted small mb-2">Existing limited examiner-style pack.</p>
+    <p class="text-muted small mb-2">Download an examiner-style pack for the selected trust accounting year.</p>
     <form method="get" action="{% url 'trust:examiner_pack' account.pk %}" class="row g-2">
       <div class="col-auto"><input type="number" name="year" class="form-control form-control-sm" value="{{ year_form.year.value }}" min="2000" max="2100"></div>
       <div class="col-auto"><button type="submit" class="btn btn-sm btn-outline-dark">Download ZIP</button></div>
@@ -76,7 +77,7 @@
         <input id="trust-records-technical-{{ account.pk }}" type="checkbox" name="include_technical" value="1" class="form-check-input">
         <label class="form-check-label" for="trust-records-technical-{{ account.pk }}">Include technical integrity files</label>
       </div>
-      <div class="col-auto align-self-end"><button type="submit" class="btn btn-sm btn-outline-dark">Download Trust Records ZIP</button></div>
+      <div class="col-auto align-self-end"><button type="submit" class="btn btn-sm btn-outline-dark">Download Trust Records / Examiner ZIP</button></div>
     </form>
   </div>
 </div>

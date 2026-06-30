@@ -9,6 +9,7 @@
 
 <div class="mb-3">
   <a href="{% url 'trust:authorised_signatory_create' %}" class="btn btn-primary">New Authorised Signatory</a>
+  <a href="{% url 'trust:authorised_signatory_pdf' %}" class="btn btn-outline-secondary">Export PDF</a>
 </div>
 
 <p><strong>{{ active_count }}</strong> active authorised signator{{ active_count|pluralize:"y,ies" }}.</p>

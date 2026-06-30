@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Unclaimed Money Register – Matter Funds{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-4">
+  <div>
+    <h1>Unclaimed Money Register</h1>
+    <p class="text-muted mb-0">Internal review register for old or potentially unclaimed trust balances.</p>
+  </div>
+  <a href="{% url 'trust:unclaimed_money_create' %}" class="btn btn-primary">New Review Record</a>
+</div>
+
+<div class="alert alert-warning">
+  <strong>Compliance note:</strong> This register is a platform record-keeping and review tool. Treatment of unclaimed money should be verified against the current legislation, rules, Law Society guidance and any applicable statutory process before payment, transfer or closure.
+</div>
+
+<form method="get" class="row g-2 mb-3">
+  <div class="col-auto">
+    <select name="status" class="form-select">
+      <option value="">All statuses</option>
+      {% for value, label in status_choices %}
+        <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-secondary" type="submit">Filter</button>
+  </div>
+</form>
+
+<div class="card shadow-sm border-0">
+  <div class="card-body">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>Date identified</th>
+          <th>Matter</th>
+          <th>Trust account</th>
+          <th class="text-end">Amount</th>
+          <th>Last activity</th>
+          <th>Status</th>
+          <th>Reviewed</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for record in records %}
+        <tr>
+          <td>{{ record.date_identified }}</td>
+          <td>
+            {{ record.matter_ledger.matter.file_number }}<br>
+            <span class="text-muted small">{{ record.matter_ledger.matter }}</span>
+          </td>
+          <td>{{ record.trust_account.name }}</td>
+          <td class="text-end">${{ record.amount }}</td>
+          <td>{{ record.date_last_activity|default:"-" }}</td>
+          <td><span class="badge bg-secondary">{{ record.get_status_display }}</span></td>
+          <td>
+            {% if record.reviewed_on %}
+              {{ record.reviewed_on }}
+            {% else %}
+              <span class="text-muted">Not reviewed</span>
+            {% endif %}
+          </td>
+          <td class="text-end">
+            <a href="{% url 'trust:unclaimed_money_update' record.pk %}" class="btn btn-sm btn-outline-primary">Open</a>
+          </td>
+        </tr>
+        {% empty %}
+        <tr>
+          <td colspan="8" class="text-muted">No unclaimed money review records found.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -12,7 +12,7 @@ urlpatterns = [
     path('firms/', include('apps.firms.urls')),
     path('clients/', include('apps.clients.urls')),
     path('matters/', include('apps.matters.urls')),
-    path('trust/', include('apps.trust.urls')),
+    path('trust/', include(('apps.trust.urls', 'trust'), namespace='trust')),
     path('audit/', include('apps.audit.urls')),
     path('dashboard/', include('apps.dashboard.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
