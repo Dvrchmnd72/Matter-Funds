@@ -195,13 +195,24 @@ def receipts_cash_book_pdf_bytes(trust_account, date_from, date_to):
         date_deposited = str(txn.date_banked or "") if receipt and receipt.uses_separate_deposit_date else ""
         amount_deposited = str(txn.amount) if date_deposited else ""
 
+        matter = txn.matter_ledger.matter
+        matter_details = (
+            f"{getattr(matter.client, 'name', '')}\n"
+            f"Ref: {matter.file_number or matter.pk}\n"
+            f"{matter.description}"
+        )
+        received_from_reason = (
+            f"{receipt.payor_name}\nReason: {receipt.purpose}"
+            if receipt else txn.description
+        )
+
         rows.append([
             str(date_made_out or ""),
             date_received_if_different,
             date_deposited,
             str(receipt.receipt_number) if receipt else "",
-            str(txn.matter_ledger.matter),
-            receipt.payor_name if receipt else txn.description,
+            matter_details,
+            received_from_reason,
             receipt.get_payment_method_display() if receipt else "",
             str(txn.amount),
             amount_deposited,
