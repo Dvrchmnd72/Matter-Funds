@@ -1380,6 +1380,9 @@ def receipt_pdf(receipt):
         ["Made out by", made_out_by],
     ]
 
+    if receipt.payment_reference_override:
+        details.insert(7, ["Payment / receipt reference", receipt.payment_reference_override])
+
     if receipt.cheque_number:
         details.insert(7, ["Cheque number", receipt.cheque_number])
 
