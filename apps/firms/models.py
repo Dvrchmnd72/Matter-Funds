@@ -90,3 +90,52 @@ class Firm(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class FirmAccessRequest(models.Model):
+    STATUS_PENDING = 'pending'
+    STATUS_APPROVED = 'approved'
+    STATUS_REJECTED = 'rejected'
+
+    STATUS_CHOICES = [
+        (STATUS_PENDING, 'Pending'),
+        (STATUS_APPROVED, 'Approved'),
+        (STATUS_REJECTED, 'Rejected'),
+    ]
+
+    firm = models.ForeignKey(
+        Firm,
+        on_delete=models.CASCADE,
+        related_name='access_requests',
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='firm_access_requests',
+    )
+    requested_role = models.CharField(
+        max_length=30,
+        blank=True,
+        help_text='Requested role within the firm, subject to firm admin/principal approval.'
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=STATUS_PENDING)
+    request_note = models.TextField(blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name='firm_access_requests_reviewed',
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    review_note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = 'Firm Access Request'
+        verbose_name_plural = 'Firm Access Requests'
+        ordering = ['-created_at']
+        unique_together = [('firm', 'user', 'status')]
+
+    def __str__(self):
+        return f'{self.user} access request for {self.firm} ({self.status})'
