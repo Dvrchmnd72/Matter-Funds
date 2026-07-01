@@ -14,7 +14,7 @@ from django.views import View
 from apps.trust.compliance import ComplianceService
 from django.views.generic import ListView, DetailView, CreateView, UpdateView, TemplateView, FormView
 
-from apps.accounts.permissions import StaffRequiredMixin, AdminOrAccountantMixin
+from apps.accounts.permissions import can_prepare_trust_records, StaffRequiredMixin, AdminOrAccountantMixin
 from apps.trust import services
 from apps.trust import reports as trust_reports
 from .models import (
@@ -1400,7 +1400,7 @@ class ReconciliationDetailView(StaffRequiredMixin, DetailView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         can_finalise, blockers = services.can_finalise_reconciliation(self.object)
-        ctx['can_finalise'] = can_finalise and self.request.user.role in ('admin', 'accountant')
+        ctx['can_finalise'] = can_finalise and can_prepare_trust_records(self.request.user)
         ctx['finalise_blockers'] = blockers
         ctx['monthly_records'] = self.object.monthly_records.all().order_by('record_type')
         period = self.object.accounting_period
@@ -1410,7 +1410,7 @@ class ReconciliationDetailView(StaffRequiredMixin, DetailView):
             and period.status == TrustAccountingPeriod.STATUS_OPEN
             and self.object.is_finalised
             and services.has_all_required_monthly_records(period)
-            and self.request.user.role in ('admin', 'accountant')
+            and can_prepare_trust_records(self.request.user)
         )
         return ctx
 
@@ -1990,13 +1990,13 @@ class IrregularityDetailView(StaffRequiredMixin, View):
 
     def get(self, request, pk):
         irr = self.get_irregularity(pk)
-        can_resolve = request.user.role in ('admin', 'accountant')
+        can_resolve = can_prepare_trust_records(request.user)
         form = IrregularityResolveForm(instance=irr) if can_resolve else None
         return render(request, self.template_name, {'irregularity': irr, 'form': form, 'can_resolve': can_resolve})
 
     def post(self, request, pk):
         irr = self.get_irregularity(pk)
-        can_resolve = request.user.role in ('admin', 'accountant')
+        can_resolve = can_prepare_trust_records(request.user)
         if not can_resolve:
             messages.error(request, 'You do not have permission to resolve irregularities.')
             return redirect(reverse('trust:irregularity_detail', kwargs={'pk': pk}))

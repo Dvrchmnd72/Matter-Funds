@@ -2,6 +2,7 @@ from decimal import Decimal
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Q, Sum
 from django.views.generic import TemplateView
+from apps.accounts.permissions import is_platform_admin, can_prepare_trust_records
 
 from apps.matters.models import Matter
 from apps.trust.compliance import ComplianceService
@@ -14,7 +15,7 @@ class DashboardView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
         user = self.request.user
-        if user.role == 'admin':
+        if is_platform_admin(user):
             open_matters = Matter.objects.filter(status='open').count()
             trust_accounts = TrustAccount.objects.filter(is_active=True).count()
             total_balance = MatterLedger.objects.aggregate(t=Sum('balance'))['t'] or Decimal('0.00')
